@@ -1,0 +1,20 @@
+# Removes the vehicle from its own scan.
+#
+# The LiDAR sits in a slot under the load deck and sees the four deck posts as returns at
+# about 0.35 m. Every return inside the vehicle's outline (plus 2 cm) is set to NaN, so
+# SLAM, localisation, the costmaps and the safety fields all work on a scan that only
+# shows the world. /scan_raw in, /scan out.
+scan_filter:
+  ros__parameters:
+    filter1:
+      name: vehicle_outline
+      type: laser_filters/LaserScanBoxFilter
+      params:
+        box_frame: base_link
+        min_x: -0.32
+        max_x: 0.32
+        min_y: -0.24
+        max_y: 0.24
+        min_z: -0.5
+        max_z: 0.5
+        invert: false

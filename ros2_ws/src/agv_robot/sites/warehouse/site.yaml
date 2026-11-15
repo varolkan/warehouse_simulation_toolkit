@@ -1,0 +1,98 @@
+# The warehouse: where the AGV docks and where it may not go.
+#
+# Map frame, metres, headings in degrees. A station's pose is the vehicle's pose when
+# docked there, heading towards the transfer stand (or the charger); Nav2 brings the
+# vehicle to the approach pose 0.8 m straight back from it and the docking controller
+# drives the rest.
+#
+# After changing this file, regenerate what is built from it:
+#   ros2 run agv_robot generate_masks      keepout.pgm / speed.pgm next to this file
+#   ros2 run agv_gazebo generate_world     the station stands in the Gazebo world
+# The package tests fail if either is forgotten.
+
+name: warehouse
+frame: map
+
+stations:
+  # Against the south wall, east of the racks, out of every route.
+  charger:
+    kind: charger
+    pose: [8.7, -8.85, -90]
+  # Goods in, by the roll-up door in the west wall.
+  inbound:
+    kind: transfer
+    pose: [-8.0, -1.25, 180]
+  # At the closed end of the two rack aisles. Aisle A is 1.46 m wide, aisle B 1.19 m.
+  rack_a:
+    kind: transfer
+    pose: [3.82, -8.75, -90]
+  rack_b:
+    kind: transfer
+    pose: [5.98, -8.75, -90]
+  # In front of the row of bins on the north side.
+  packing:
+    kind: transfer
+    pose: [5.5, 4.75, 90]
+  # Goods out, at the east barrier.
+  outbound:
+    kind: transfer
+    pose: [8.9, 0.0, 0]
+  # Between the two pallet bays.
+  buffer:
+    kind: transfer
+    pose: [-3.2, 4.2, 90]
+
+zones:
+  # The scanner's beam plane is 0.20 m above the floor. At that height a pallet is its
+  # nine feet and a rack is its posts and whatever stands on the bottom shelf: the map
+  # shows gaps there that the vehicle fits through and the real thing does not have.
+  # Storage is therefore fenced off here, as it is on a real site.
+  - name: rack_1
+    kind: keepout
+    polygon: [[6.85, 0.70], [7.85, 0.70], [7.85, 2.80], [6.85, 2.80]]
+  - name: rack_2
+    kind: keepout
+    polygon: [[4.87, 0.70], [5.87, 0.70], [5.87, 2.80], [4.87, 2.80]]
+  - name: rack_3
+    kind: keepout
+    polygon: [[6.50, -9.70], [7.50, -9.70], [7.50, -5.60], [6.50, -5.60]]
+  - name: rack_4
+    kind: keepout
+    polygon: [[4.47, -9.70], [5.47, -9.70], [5.47, -5.60], [4.47, -5.60]]
+  - name: rack_5
+    kind: keepout
+    polygon: [[2.17, -9.70], [3.17, -9.70], [3.17, -5.60], [2.17, -5.60]]
+  - name: pallet_bay_west
+    kind: keepout
+    polygon: [[-8.95, 0.90], [-4.10, 0.90], [-4.10, 2.95], [-8.95, 2.95]]
+  - name: pallet_bay_north
+    kind: keepout
+    polygon: [[-6.95, 5.30], [0.10, 5.30], [0.10, 7.35], [-6.95, 7.35]]
+  # The yellow frame across the hall: posts every metre with 0.95 m between them. The
+  # vehicle would fit; it goes round the ends instead.
+  - name: frame
+    kind: keepout
+    polygon: [[-5.30, -2.00], [5.30, -2.00], [5.30, -1.40], [-5.30, -1.40]]
+  # The staircase rises to the west from its foot at x = -1.9. The scanner sees the
+  # bottom step and nothing of the flight above it.
+  - name: stairs
+    kind: keepout
+    polygon: [[-4.60, -6.45], [-1.25, -6.45], [-1.25, -5.15], [-4.60, -5.15]]
+
+  # Where people work or the walls are close.
+  - name: rack_aisle_a
+    kind: speed
+    limit: 0.4
+    polygon: [[3.17, -9.70], [4.47, -9.70], [4.47, -5.30], [3.17, -5.30]]
+  - name: rack_aisle_b
+    kind: speed
+    limit: 0.4
+    polygon: [[5.47, -9.70], [6.50, -9.70], [6.50, -5.30], [5.47, -5.30]]
+  - name: packing_area
+    kind: speed
+    limit: 0.4
+    polygon: [[2.40, 3.60], [8.60, 3.60], [8.60, 5.60], [2.40, 5.60]]
+  - name: door
+    kind: speed
+    limit: 0.5
+    polygon: [[-8.95, -3.00], [-6.40, -3.00], [-6.40, 0.60], [-8.95, 0.60]]

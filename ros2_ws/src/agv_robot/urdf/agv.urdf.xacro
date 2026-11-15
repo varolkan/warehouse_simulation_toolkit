@@ -1,0 +1,234 @@
+<?xml version="1.0"?>
+<!--
+  The AGV: a 0.60 x 0.44 m centre-drive tote carrier.
+
+  Two driven wheels on the centre axle and a ball caster front and rear, so the vehicle
+  turns about its own centre. The body is split by a scanner slot: one 360 degree
+  safety-style LiDAR sits in the middle of it with its beam plane 0.20 m above the floor,
+  and four thin posts at the corners carry the load deck over it. The posts are inside the
+  scan (four returns at about 0.35 m) and are removed again by the scan filter in
+  agv_robot/config/scan_filter.yaml, which drops every return inside the vehicle outline.
+
+  Frames: base_footprint (on the floor under the axle centre) -> base_link (axle centre)
+  -> lidar_link, imu_link, deck_link, casters; wheels on continuous joints.
+
+  `sim:=true` adds the Gazebo sensors and systems from agv.gazebo.xacro.
+-->
+<robot name="agv" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="sim" default="false"/>
+  <!-- Simulation only: the joint that holds the load, and the name of the load's model. -->
+  <xacro:arg name="load_joint" default="true"/>
+  <xacro:arg name="load_model" default="tote"/>
+
+  <!-- Geometry, metres. agv_core/vehicle.py holds the same outline and wheel numbers. -->
+  <xacro:property name="body_length" value="0.60"/>
+  <xacro:property name="body_width" value="0.44"/>
+  <xacro:property name="ground_clearance" value="0.03"/>
+  <xacro:property name="lower_body_height" value="0.13"/>
+  <xacro:property name="slot_height" value="0.08"/>
+  <xacro:property name="deck_thickness" value="0.02"/>
+  <xacro:property name="post_size" value="0.015"/>
+  <xacro:property name="wheel_radius" value="0.075"/>
+  <xacro:property name="wheel_width" value="0.04"/>
+  <xacro:property name="wheel_separation" value="0.29"/>
+  <xacro:property name="caster_radius" value="0.025"/>
+  <xacro:property name="caster_offset" value="0.24"/>
+  <!-- The casters ride 1 mm clear of the floor so the driven wheels always carry the load. -->
+  <xacro:property name="caster_clearance" value="0.001"/>
+  <xacro:property name="lidar_height" value="0.20"/>
+
+  <xacro:property name="body_mass" value="26.0"/>
+  <xacro:property name="wheel_mass" value="1.2"/>
+  <xacro:property name="deck_mass" value="2.5"/>
+
+  <!-- Heights above the floor. -->
+  <xacro:property name="slot_bottom" value="${ground_clearance + lower_body_height}"/>
+  <xacro:property name="slot_top" value="${slot_bottom + slot_height}"/>
+  <xacro:property name="deck_top" value="${slot_top + deck_thickness}"/>
+
+  <material name="graphite"><color rgba="0.16 0.18 0.20 1.0"/></material>
+  <material name="deck_grey"><color rgba="0.62 0.65 0.66 1.0"/></material>
+  <material name="rubber"><color rgba="0.05 0.05 0.05 1.0"/></material>
+  <material name="signal_green"><color rgba="0.05 0.70 0.32 1.0"/></material>
+  <material name="scanner_yellow"><color rgba="0.95 0.78 0.10 1.0"/></material>
+  <material name="steel"><color rgba="0.75 0.77 0.78 1.0"/></material>
+
+  <xacro:macro name="box_inertia" params="mass x y z">
+    <inertia ixx="${mass * (y*y + z*z) / 12.0}" ixy="0" ixz="0"
+             iyy="${mass * (x*x + z*z) / 12.0}" iyz="0"
+             izz="${mass * (x*x + y*y) / 12.0}"/>
+  </xacro:macro>
+
+  <link name="base_footprint"/>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Lower body: drive unit, battery, electronics. Origin at the axle centre. -->
+  <link name="base_link">
+    <inertial>
+      <!-- Battery and motors sit low: centre of mass 15 mm under the axle. -->
+      <origin xyz="0 0 -0.015" rpy="0 0 0"/>
+      <mass value="${body_mass}"/>
+      <xacro:box_inertia mass="${body_mass}" x="${body_length}" y="${body_width}"
+                         z="${lower_body_height}"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 ${ground_clearance + lower_body_height / 2 - wheel_radius}" rpy="0 0 0"/>
+      <geometry><box size="${body_length} ${body_width} ${lower_body_height}"/></geometry>
+      <material name="graphite"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${ground_clearance + lower_body_height / 2 - wheel_radius}" rpy="0 0 0"/>
+      <geometry><box size="${body_length} ${body_width} ${lower_body_height}"/></geometry>
+    </collision>
+  </link>
+
+  <!-- A green band round the lower body: which way is front is the yellow scanner side. -->
+  <link name="band_link">
+    <visual>
+      <geometry>
+        <box size="${body_length + 0.004} ${body_width + 0.004} 0.02"/>
+      </geometry>
+      <material name="signal_green"/>
+    </visual>
+  </link>
+  <joint name="band_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="band_link"/>
+    <origin xyz="0 0 ${slot_bottom - 0.03 - wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:macro name="drive_wheel" params="side reflect">
+    <link name="${side}_wheel_link">
+      <inertial>
+        <mass value="${wheel_mass}"/>
+        <inertia ixx="${wheel_mass * (3 * wheel_radius * wheel_radius + wheel_width * wheel_width) / 12.0}"
+                 ixy="0" ixz="0"
+                 iyy="${wheel_mass * wheel_radius * wheel_radius / 2.0}" iyz="0"
+                 izz="${wheel_mass * (3 * wheel_radius * wheel_radius + wheel_width * wheel_width) / 12.0}"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi / 2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="rubber"/>
+      </visual>
+      <!--
+        A sphere, not the tyre's cylinder: a cylinder on a plane touches at its two rims,
+        and the physics engine then turns the vehicle about the inner rims, a track 35 mm
+        narrower than the one odometry assumes (measured: 185 degrees turned, 167 reported).
+        A sphere touches at one point on the wheel's centre plane.
+      -->
+      <collision>
+        <geometry><sphere radius="${wheel_radius}"/></geometry>
+      </collision>
+    </link>
+    <joint name="${side}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${side}_wheel_link"/>
+      <origin xyz="0 ${reflect * wheel_separation / 2} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="20.0" velocity="30.0"/>
+      <dynamics damping="0.05" friction="0.0"/>
+    </joint>
+  </xacro:macro>
+  <xacro:drive_wheel side="left" reflect="1"/>
+  <xacro:drive_wheel side="right" reflect="-1"/>
+
+  <xacro:macro name="caster" params="name x">
+    <link name="${name}_caster_link">
+      <visual>
+        <geometry><sphere radius="${caster_radius}"/></geometry>
+        <material name="steel"/>
+      </visual>
+      <collision>
+        <geometry><sphere radius="${caster_radius}"/></geometry>
+      </collision>
+    </link>
+    <joint name="${name}_caster_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${name}_caster_link"/>
+      <origin xyz="${x} 0 ${caster_radius + caster_clearance - wheel_radius}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+  <xacro:caster name="front" x="${caster_offset}"/>
+  <xacro:caster name="rear" x="${-caster_offset}"/>
+
+  <xacro:macro name="post" params="x y">
+    <visual>
+      <origin xyz="${x} ${y} ${-(deck_thickness + slot_height) / 2}" rpy="0 0 0"/>
+      <geometry><box size="${post_size} ${post_size} ${slot_height}"/></geometry>
+      <material name="steel"/>
+    </visual>
+  </xacro:macro>
+
+  <!-- Load deck over the scanner slot, on four corner posts. -->
+  <link name="deck_link">
+    <inertial>
+      <mass value="${deck_mass}"/>
+      <xacro:box_inertia mass="${deck_mass}" x="${body_length}" y="${body_width}"
+                         z="${deck_thickness}"/>
+    </inertial>
+    <visual>
+      <geometry><box size="${body_length} ${body_width} ${deck_thickness}"/></geometry>
+      <material name="deck_grey"/>
+    </visual>
+    <collision>
+      <geometry><box size="${body_length} ${body_width} ${deck_thickness}"/></geometry>
+    </collision>
+    <xacro:post x="${body_length / 2 - post_size}" y="${body_width / 2 - post_size}"/>
+    <xacro:post x="${body_length / 2 - post_size}" y="${-(body_width / 2 - post_size)}"/>
+    <xacro:post x="${-(body_length / 2 - post_size)}" y="${body_width / 2 - post_size}"/>
+    <xacro:post x="${-(body_length / 2 - post_size)}" y="${-(body_width / 2 - post_size)}"/>
+  </link>
+  <joint name="deck_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="deck_link"/>
+    <origin xyz="0 0 ${slot_top + deck_thickness / 2 - wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 2D LiDAR in the slot. lidar_link is the optical centre: beam plane 0.20 m up. -->
+  <link name="lidar_link">
+    <visual>
+      <origin xyz="0 0 ${(slot_bottom - lidar_height) / 2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.035" length="${lidar_height - slot_bottom}"/></geometry>
+      <material name="scanner_yellow"/>
+    </visual>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 ${lidar_height - wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- A yellow plate on the front face marks the direction of travel. -->
+  <link name="front_marker_link">
+    <visual>
+      <geometry><box size="0.004 0.16 0.05"/></geometry>
+      <material name="scanner_yellow"/>
+    </visual>
+  </link>
+  <joint name="front_marker_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_marker_link"/>
+    <origin xyz="${body_length / 2 + 0.002} 0 ${ground_clearance + 0.05 - wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.02" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:if value="$(arg sim)">
+    <xacro:include filename="$(find agv_robot)/urdf/agv.gazebo.xacro"/>
+    <xacro:agv_gazebo wheel_radius="${wheel_radius}" wheel_separation="${wheel_separation}"
+                      load_joint="$(arg load_joint)" load_model="$(arg load_model)"/>
+  </xacro:if>
+
+</robot>
