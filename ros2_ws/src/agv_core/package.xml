@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>agv_core</name>
+  <version>1.0.0</version>
+  <description>
+    Decision-making of the warehouse AGV as a plain Python library with no ROS in it: the
+    site file, LiDAR safety fields, docking, battery policy, the transport mission state
+    machine, and a kinematic stand-in for the vehicle to test them against.
+  </description>
+  <maintainer email="148723216+varolkan@users.noreply.github.com">varolkan</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_cmake_flake8</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
