@@ -16,4 +16,7 @@ This repository started as a fork of an existing project and still ships some of
 - **Source**: the GEAR simulation of the Agile Robotics for Industrial Automation Competition (ARIAC), by Open Source Robotics Foundation with NIST. They reached this repository through the fork above, which credits GEAR (<https://bitbucket.org/osrf/ariac>). The same models are published in the `nist_gear` package of <https://github.com/usnistgov/ARIAC>.
 - **Authors** (from each `model.config`): Nate Koenig; Cole Biesemeyer.
 - **License**: Apache License 2.0, as declared in the GEAR package manifest. A copy is in [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
-- **Changes made here**: the meshes and textures are unchanged. `mesh_backup.dae`, an unused copy of the workcell mesh, was removed. Changes to the `model.sdf` files are listed at the top of each file.
+- **Changes made here**, all so that Gazebo Harmonic loads what Gazebo Classic did:
+  - `workcell/model.sdf`: one of two collisions that shared a name was renamed (noted at the top of the file).
+  - `workcell/meshes/mesh.dae` and `workcell_bin/meshes/bin.dae`: the texture file names in `<library_images>` now carry their path, `../materials/textures/`. The geometry is untouched.
+  - `mesh_backup.dae`, an unused copy of the workcell mesh, was removed.

@@ -557,49 +557,49 @@
   </library_effects>
   <library_images>
     <image id="CardboardBoxes_png" name="CardboardBoxes_png">
-      <init_from>CardboardBoxes.png</init_from>
+      <init_from>../materials/textures/CardboardBoxes.png</init_from>
     </image>
     <image id="ControlPanel_png" name="ControlPanel_png">
-      <init_from>ControlPanel.png</init_from>
+      <init_from>../materials/textures/ControlPanel.png</init_from>
     </image>
     <image id="Door_Window_png" name="Door_Window_png">
-      <init_from>Door_Window.png</init_from>
+      <init_from>../materials/textures/Door_Window.png</init_from>
     </image>
     <image id="Floor_png" name="Floor_png">
-      <init_from>Floor.png</init_from>
+      <init_from>../materials/textures/Floor.png</init_from>
     </image>
     <image id="PalletWrap_png" name="PalletWrap_png">
-      <init_from>PalletWrap.png</init_from>
+      <init_from>../materials/textures/PalletWrap.png</init_from>
     </image>
     <image id="Pallet_png" name="Pallet_png">
-      <init_from>Pallet.png</init_from>
+      <init_from>../materials/textures/Pallet.png</init_from>
     </image>
     <image id="Pillar_png" name="Pillar_png">
-      <init_from>Pillar.png</init_from>
+      <init_from>../materials/textures/Pillar.png</init_from>
     </image>
     <image id="Plywood_png" name="Plywood_png">
-      <init_from>Plywood.png</init_from>
+      <init_from>../materials/textures/Plywood.png</init_from>
     </image>
     <image id="RollupDoor_png" name="RollupDoor_png">
-      <init_from>RollupDoor.png</init_from>
+      <init_from>../materials/textures/RollupDoor.png</init_from>
     </image>
     <image id="RubberMat_png" name="RubberMat_png">
-      <init_from>RubberMat.png</init_from>
+      <init_from>../materials/textures/RubberMat.png</init_from>
     </image>
     <image id="Shelves_png" name="Shelves_png">
-      <init_from>Shelves.png</init_from>
+      <init_from>../materials/textures/Shelves.png</init_from>
     </image>
     <image id="Stairs_png" name="Stairs_png">
-      <init_from>Stairs.png</init_from>
+      <init_from>../materials/textures/Stairs.png</init_from>
     </image>
     <image id="Wall_Concrete_png" name="Wall_Concrete_png">
-      <init_from>Wall_Concrete.png</init_from>
+      <init_from>../materials/textures/Wall_Concrete.png</init_from>
     </image>
     <image id="Wall_Corrugated_png" name="Wall_Corrugated_png">
-      <init_from>Wall_Corrugated.png</init_from>
+      <init_from>../materials/textures/Wall_Corrugated.png</init_from>
     </image>
     <image id="Yellow_png" name="Yellow_png">
-      <init_from>Yellow.png</init_from>
+      <init_from>../materials/textures/Yellow.png</init_from>
     </image>
   </library_images>
   <library_materials>

@@ -1,4 +1,13 @@
 <?xml version="1.0" ?>
+<!--
+  ARIAC / GEAR workcell, Open Source Robotics Foundation, Apache License 2.0
+  (see THIRD_PARTY_NOTICES.md at the top of this repository).
+
+  Changed for this project:
+  - the collision of conveyor_frame_4 was named conveyor_frame_3_collision, the same as
+    its neighbour's. Gazebo Classic let that pass; Gazebo Harmonic refuses to load a link
+    with two collisions of one name. It is now conveyor_frame_4_collision.
+-->
 <sdf version="1.6">
   <model name="workcell">
     <static>true</static>
@@ -255,7 +264,7 @@
           <diffuse>0.725490196 0.517647059 0 1</diffuse>
         </material>
       </visual>
-      <collision name="conveyor_frame_3_collision">
+      <collision name="conveyor_frame_4_collision">
         <pose>5 -1.455 3.0 0 0 0</pose>
         <geometry>
           <box>

@@ -1518,7 +1518,7 @@
   </library_lights>
   <library_images>
     <image id="Bin_png">
-      <init_from>bin.png</init_from>
+      <init_from>../materials/textures/bin.png</init_from>
     </image>
   </library_images>
   <library_visual_scenes>
