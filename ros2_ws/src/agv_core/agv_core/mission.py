@@ -97,6 +97,13 @@ class MissionConfig:
     leg_speed_floor: float = 0.15          # a leg may take its length at this speed...
     leg_timeout_margin: float = 60.0       # ...plus this
     leg_timeout_default: float = 300.0     # when the length is not known
+    # Navigation that comes no nearer its goal (Nav2's remaining distance down by
+    # progress_distance) in progress_timeout of driving has failed that attempt. Nav2 keeps
+    # finding ways past the side of an obstacle the scanner has not seen yet, and a vehicle
+    # in front of a closed aisle would otherwise try one way and the other until the leg's
+    # deadline. Time held or stopped for an obstacle does not count.
+    progress_timeout: float = 60.0
+    progress_distance: float = 0.5
     approach_tolerance: float = 0.25       # how near the approach pose "arrived" is
     approach_heading_tolerance: float = 0.6
 
@@ -220,6 +227,9 @@ class _Travel:
     wait_until: Optional[float] = None
     length: Optional[float] = None
     remaining: float = 0.0
+    # The nearest navigation has brought the vehicle to its goal, and when (in step time).
+    nearest: float = math.inf
+    nearest_at: float = 0.0
 
 
 @dataclass
@@ -647,14 +657,22 @@ class Mission:
             return self._travel_failed(step, inputs, out, 'navigation gave up')
         if inputs.nav_distance_remaining is not None:
             step.remaining = inputs.nav_distance_remaining
+            if step.remaining < step.nearest - cfg.progress_distance:
+                step.nearest, step.nearest_at = step.remaining, self._step_time
         if self._step_time > limit:
             out.cancel_navigation = True
             return self._travel_failed(step, inputs, out, f'not there after {limit:.0f} s')
+        if step.nearest < math.inf and \
+                self._step_time - step.nearest_at > cfg.progress_timeout:
+            out.cancel_navigation = True
+            return self._travel_failed(
+                step, inputs, out, f'no nearer to it in {cfg.progress_timeout:.0f} s')
         return False
 
     def _send_goal(self, step: _Travel, inputs: MissionInputs, out: MissionOutputs) -> None:
         step.goal_id = self._new_id()
         step.sent_at = inputs.now
+        step.nearest, step.nearest_at = math.inf, 0.0
         self._step_time = 0.0
         out.navigate = NavGoal(step.goal_id, step.station.approach_pose, step.station.name)
 

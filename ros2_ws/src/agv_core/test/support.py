@@ -71,6 +71,7 @@ class Rig:
         self.nav_stalls = False          # take goals and never get anywhere
         self.arrival_errors = []         # (dx, dy, dyaw) for successive arrivals
         self.nav_lies = 0                # report success this many times without moving
+        self.nav_wanders = False         # drive round the goal, coming no nearer to it
 
         # The rest of the world.
         self.route_errors = {}           # station -> why there is no route to it
@@ -229,6 +230,14 @@ class Rig:
         pose = self.vehicle.pose
         distance = pose.distance_to(goal.pose)
         reach = self.nav_speed * self.dt
+        if self.nav_wanders:
+            # Round the goal at the distance the vehicle is from it: moving, never nearer.
+            around = math.atan2(pose.y - goal.pose.y, pose.x - goal.pose.x) + reach / distance
+            self.vehicle.place(Pose2D(goal.pose.x + distance * math.cos(around),
+                                      goal.pose.y + distance * math.sin(around),
+                                      around + math.pi / 2))
+            self.vehicle.distance += reach
+            return
         if distance <= reach:
             dx, dy, dyaw = self.arrival_errors.pop(0) if self.arrival_errors else (0.0, 0.0, 0.0)
             arrived = goal.pose.advanced(dx, dy)

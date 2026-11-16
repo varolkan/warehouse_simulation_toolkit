@@ -232,7 +232,8 @@ def test_without_route_checks_the_order_starts_at_once():
 
 
 def test_the_route_lengths_set_the_deadline_of_each_leg():
-    rig = started('a', 'b')
+    # Without the progress watchdog, which calls a stalled leg off long before its deadline.
+    rig = started('a', 'b', config=MissionConfig(progress_timeout=1e9))
     rig.nav_stalls = True
     rig.run_until(lambda: len(rig.goals) == 1)
     sent = rig.now
@@ -304,6 +305,36 @@ def test_navigation_that_never_arrives_runs_into_the_leg_deadline():
     result = rig.run_to_end()
     assert result.message == "could not reach 'a' in 3 attempts: not there after 20 s"
     assert rig.cancels == 3                        # each attempt was called off
+
+
+def test_navigation_that_comes_no_nearer_is_called_off_and_tried_again():
+    """A closed aisle: Nav2 keeps finding a way past the side of the pallet it cannot see."""
+    rig = started('a', 'b')
+    rig.nav_wanders = True
+    rig.run_until(lambda: 'trying again (2 of 3)' in rig.status.detail)
+    assert 'no nearer to it in 60 s' in rig.status.detail
+    assert rig.cancels == 1
+    result = rig.run_to_end()
+    assert result.message == "could not reach 'a' in 3 attempts: no nearer to it in 60 s"
+    assert len(rig.goals) == 3 and rig.cancels == 3
+
+
+def test_slow_but_steady_progress_is_not_called_off():
+    rig = started('a', 'b', config=MissionConfig(leg_timeout_margin=900.0))
+    rig.nav_speed = 0.02                           # 0.5 m every 25 s
+    rig.run_until(lambda: rig.status.state == 'docking', timeout=1200.0)
+    assert len(rig.goals) == 1 and rig.cancels == 0
+
+
+def test_time_stopped_for_an_obstacle_does_not_count_as_no_progress():
+    rig = started('a', 'b')
+    rig.run(5.0)                                   # under way
+    rig.safety, rig.safety_reason = SafetyState.PROTECTIVE_STOP, 'obstacle 0.4 m ahead'
+    rig.run(80.0)                                  # short of the 90 s blocked_timeout
+    rig.safety, rig.safety_reason = SafetyState.OK, ''
+    assert 'trying again' not in rig.status.detail
+    assert rig.run_to_end().success
+    assert len(rig.goals) == 2                     # one goal per leg: none called off
 
 
 def test_navigation_reporting_success_somewhere_else_is_not_believed():
