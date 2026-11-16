@@ -19,8 +19,13 @@ and takes:
 
 Everything it does is agv_core.simulation's. Parameters: `site`, `start` (a station name, or
 "x,y,heading_deg" in the map frame), `rate`, `scan_rate`, `loaded`, `load_duration`,
-`load_rejections`, `load_stuck`, `battery`, `charger_dead`, `odom_distance_scale`,
-`odom_turn_scale`, `obstacles` (a list in the format above), `seed`.
+`load_rejections`, `load_stuck`, `battery`, `charger_dead`, `charger_contact` (metres),
+`odom_distance_scale`, `odom_turn_scale`, `obstacles` (a list in the format above), `seed`.
+
+How well the vehicle docks here is how well AMCL localises on a scanner that casts its
+rays through 5 cm map cells: within about 6 cm. The charger therefore takes the vehicle
+within `charger_contact` = 8 cm by default, so that the tests check what the mission does
+with a charger, not the localiser's precision. Docking precision is measured in Gazebo.
 """
 
 import math
@@ -77,6 +82,7 @@ class FakeBase(Node):
         load_stuck = self.declare_parameter('load_stuck', False).value
         battery = self.declare_parameter('battery', 0.8).value
         charger_dead = self.declare_parameter('charger_dead', False).value
+        charger_contact = self.declare_parameter('charger_contact', 0.08).value
         distance_scale = self.declare_parameter('odom_distance_scale', 1.0).value
         turn_scale = self.declare_parameter('odom_turn_scale', 1.0).value
         obstacles = self.declare_parameter('obstacles', ['']).value
@@ -95,7 +101,8 @@ class FakeBase(Node):
         self.scanner.obstacles.extend(parse_obstacles(obstacles))
         self.handler = LoadHandlerSim(loaded=loaded, duration=load_duration,
                                       rejections=load_rejections, stuck=load_stuck)
-        self.battery = BatterySim(level=battery, chargers=[c.pose for c in self.site.chargers])
+        self.battery = BatterySim(level=battery, chargers=[c.pose for c in self.site.chargers],
+                                  contact_distance=charger_contact)
         self.battery.charger_dead = charger_dead
         self.wheel_angles = [0.0, 0.0]
         self.last_step = None

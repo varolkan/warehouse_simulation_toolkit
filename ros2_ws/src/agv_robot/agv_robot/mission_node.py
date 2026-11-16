@@ -52,6 +52,10 @@ import tf2_ros
 
 LOAD_STATES = {state.value: state for state in LoadState}
 SAFETY_STATES = {state.value: state for state in SafetyState}
+# Planner answers that say "not now" rather than "no": the costmap or the transforms are not
+# up yet. The request is made again, within the mission's route_check_timeout.
+TRANSIENT_PATH_ERRORS = (202, 207)
+ROUTE_RETRY_PERIOD = 0.5
 PATH_ERRORS = {
     200: 'unknown error', 201: 'invalid planner', 202: 'no transform',
     203: 'start outside the map', 204: 'goal outside the map', 205: 'start occupied',
@@ -103,7 +107,8 @@ class MissionNode(Node):
         self.nav_sending = 0
         # Route checks, one at a time: Nav2's planner drops a request when the next arrives.
         self.routes = {}
-        self.route_queue = []
+        self.route_queue = []          # (not before, request)
+        self.route_requests = {}       # request id -> request, while it is being answered
         self.route_busy = False
         # The action goal being worked on.
         self.goal_handle = None
@@ -204,7 +209,7 @@ class MissionNode(Node):
             self._command_load(out.load_command)
         if out.route_requests:
             with self.lock:
-                self.route_queue.extend(out.route_requests)
+                self.route_queue.extend((0.0, request) for request in out.route_requests)
         self._next_route()
 
         self.cycles += 1
@@ -299,11 +304,17 @@ class MissionNode(Node):
         with self.lock:
             if self.route_busy or not self.route_queue:
                 return
-            request = self.route_queue.pop(0)
+            not_before, request = self.route_queue[0]
+            if self.now() < not_before:
+                return
+            self.route_queue.pop(0)
             if not self.path_client.server_is_ready():
-                self.routes[request.request_id] = RouteReply(None, 'the planner is not running')
+                # Navigation is still starting: ask again shortly, until the mission's
+                # route_check_timeout says otherwise.
+                self.route_queue.append((self.now() + ROUTE_RETRY_PERIOD, request))
                 return
             self.route_busy = True
+            self.route_requests[request.request_id] = request
         stamp = self.get_clock().now().to_msg()
         goal = ComputePathToPose.Goal()
         goal.start = to_pose_stamped(request.start, self.map_frame, stamp)
@@ -333,12 +344,24 @@ class MissionNode(Node):
             return
         error = ''
         if response is not None:
+            if response.result.error_code in TRANSIENT_PATH_ERRORS:
+                self._route_again(request_id, response.result.error_msg)
+                return
             error = response.result.error_msg or PATH_ERRORS.get(response.result.error_code, '')
         self._route_done(request_id, RouteReply(None, error or 'no path'))
+
+    def _route_again(self, request_id: int, why: str) -> None:
+        with self.lock:
+            request = self.route_requests.pop(request_id, None)
+            self.route_busy = False
+            if request is not None:
+                self.route_queue.append((self.now() + ROUTE_RETRY_PERIOD, request))
+        self.get_logger().info(f'route check to be repeated: {why}')
 
     def _route_done(self, request_id: int, reply: RouteReply) -> None:
         with self.lock:
             self.routes[request_id] = reply
+            self.route_requests.pop(request_id, None)
             self.route_busy = False
 
     # -- the load handler ---------------------------------------------------------------------
