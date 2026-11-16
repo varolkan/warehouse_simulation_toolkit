@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Entry point of agv_gazebo's sim_agv_node (the node itself is agv_gazebo/sim_agv_node.py)."""
+
+from agv_gazebo.sim_agv_node import main
+
+if __name__ == '__main__':
+    main()

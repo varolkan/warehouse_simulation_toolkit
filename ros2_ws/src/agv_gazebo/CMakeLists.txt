@@ -6,7 +6,8 @@ find_package(ament_cmake_python REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS scripts/generate_world.py DESTINATION lib/${PROJECT_NAME} RENAME generate_world)
-install(DIRECTORY config models worlds DESTINATION share/${PROJECT_NAME})
+install(PROGRAMS scripts/sim_agv_node DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY config launch models worlds DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_flake8 REQUIRED)

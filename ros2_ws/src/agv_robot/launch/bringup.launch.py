@@ -49,6 +49,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'sim', default_value='false',
             description='Publish the description with its Gazebo parts (for spawning).'),
+        DeclareLaunchArgument('load_joint', default_value='true',
+                              description='With sim: the joint that holds the load.'),
         DeclareLaunchArgument('initial_x', default_value='',
                               description='Start pose for AMCL; default: the first charger.'),
         DeclareLaunchArgument('initial_y', default_value=''),
@@ -56,7 +58,8 @@ def generate_launch_description():
         DeclareLaunchArgument('log_level', default_value='info'),
 
         include('description.launch.py', {
-            'use_sim_time': use_sim_time, 'sim': LaunchConfiguration('sim')}),
+            'use_sim_time': use_sim_time, 'sim': LaunchConfiguration('sim'),
+            'load_joint': LaunchConfiguration('load_joint')}),
         include('localization.launch.py', {
             'use_sim_time': use_sim_time, 'slam': mapping, 'site': site,
             'initial_x': LaunchConfiguration('initial_x'),

@@ -20,12 +20,16 @@ def generate_launch_description():
     xacro_file = os.path.join(
         get_package_share_directory('agv_robot'), 'urdf', 'agv.urdf.xacro')
     description = ParameterValue(
-        Command(['xacro ', xacro_file, ' sim:=', LaunchConfiguration('sim')]), value_type=str)
+        Command(['xacro ', xacro_file, ' sim:=', LaunchConfiguration('sim'),
+                 ' load_joint:=', LaunchConfiguration('load_joint')]), value_type=str)
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument(
             'sim', default_value='false',
             description='Include the Gazebo sensors and systems in the description.'),
+        DeclareLaunchArgument(
+            'load_joint', default_value='true',
+            description='Simulation: include the joint that holds the load on the deck.'),
         Node(
             package='robot_state_publisher', executable='robot_state_publisher',
             name='robot_state_publisher', output='screen',
