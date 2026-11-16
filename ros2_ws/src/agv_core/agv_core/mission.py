@@ -681,8 +681,10 @@ class Mission:
                        f'{cfg.undock_timeout:.0f} s', out)
             return False
         speed = max(0.05, min(cfg.undock_speed, 0.8 * to_go))
-        # Hold the station's heading while backing out.
-        turn = max(-0.3, min(0.3, -1.5 * local.yaw))
+        # Hold the station's heading while backing out, on gentle curves only (see
+        # DockingConfig.min_turn_radius).
+        limit = min(0.3, speed / self.docking.min_turn_radius)
+        turn = max(-limit, min(limit, -1.5 * local.yaw))
         out.velocity = (-speed, turn)
         return False
 

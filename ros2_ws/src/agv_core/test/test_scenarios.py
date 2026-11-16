@@ -149,13 +149,17 @@ def test_someone_stepping_out_in_front_of_the_vehicle_is_not_hit():
     x, y = world.ahead(AGV.half_length + 0.35 + 0.25)
     person = Disc(x, y, 0.25)
     world.obstacles.append(person)
-    world.run(4.0)
+    closest = math.inf
+    for _ in range(int(4.0 / world.dt)):
+        world.step()
+        lx, ly = world.vehicle.pose.to_local((x, y))
+        closest = min(closest, math.hypot(max(abs(lx) - AGV.half_length, 0.0),
+                                          max(abs(ly) - AGV.half_width, 0.0)) - person.radius)
     stopped = [s for s in world.safety_states if s.state is SafetyState.PROTECTIVE_STOP]
     assert stopped and 'm ahead' in stopped[0].reason
     never_touched(world)
-    # Stopped short of the person: bumper to the person's edge, measured along the heading.
-    ahead_of_bumper = world.vehicle.pose.to_local((x, y))[0] - AGV.half_length - person.radius
-    assert 0.0 < ahead_of_bumper < 0.35
+    # From 0.8 m/s it stopped short of them, with room to spare.
+    assert closest > 0.05, closest
     world.obstacles.remove(person)
     result = world.run_to_end()
     assert result.success

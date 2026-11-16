@@ -117,6 +117,15 @@ def test_it_never_reverses_and_never_hurries():
         assert max(abs(c.w) for c in commands) <= CFG.max_turn_rate + 1e-9
 
 
+def test_it_drives_in_on_gentle_curves_only():
+    """No arc tighter than min_turn_radius while moving: the corners stay over the run."""
+    for left, turned in ((0.10, 6.0), (-0.10, -6.0), (0.05, 0.0), (0.0, 10.0)):
+        _, _, commands = dock(start_pose(left=left, turned=math.radians(turned)))
+        moving = [c for c in commands if c.v > 0.0]
+        assert moving
+        assert all(abs(c.w) <= c.v / CFG.min_turn_radius + 1e-9 for c in moving)
+
+
 def test_it_slows_to_a_crawl_at_the_stop_line():
     _, _, commands = dock(start_pose(back=1.5))
     moving = [c for c in commands if c.phase is DockingPhase.APPROACH]

@@ -194,6 +194,71 @@ def test_the_outer_front_corner_swings_wide_in_a_tight_turn():
     assert gate(SafetyMonitor(), 0.0, [inside], v=0.4, w=0.8, measured=(0.0, 0.0)).gap is None
 
 
+def first_contact_by_simulation(point, v, w, half_length, half_width, step=0.002, reach=3.0):
+    """Drive a rectangle along the arc in 2 mm steps; return when it first covers the point."""
+    travelled = 0.0
+    x, y, yaw = 0.0, 0.0, 0.0
+    radius = v / w if abs(w) > 1e-9 else math.inf
+    sign = 1.0 if v >= 0.0 else -1.0
+    while travelled <= reach:
+        c, s = math.cos(yaw), math.sin(yaw)
+        lx = c * (point[0] - x) + s * (point[1] - y)
+        ly = -s * (point[0] - x) + c * (point[1] - y)
+        if abs(lx) <= half_length and abs(ly) <= half_width:
+            return travelled
+        if math.isinf(radius):
+            x += sign * step
+        else:
+            dyaw = (w / abs(v)) * step
+            x += sign * step * math.cos(yaw + dyaw / 2.0)
+            y += sign * step * math.sin(yaw + dyaw / 2.0)
+            yaw += dyaw
+        travelled += step
+    return math.inf
+
+
+def test_on_an_arc_the_gate_knows_exactly_when_the_outline_meets_a_point():
+    """The arc reach against a brute-force simulation, for 1000 random arcs and points."""
+    from agv_core.safety import _arc_contact_distances
+
+    rng = np.random.default_rng(3)
+    half_width = HW + CFG.side_margin
+    checked = 0
+    for _ in range(1000):
+        radius = rng.uniform(0.3, 4.0) * rng.choice([-1.0, 1.0])
+        v = rng.uniform(0.05, 1.0) * rng.choice([-1.0, 1.0])
+        w = v / radius
+        # Somewhere near where the vehicle will be after 0 to 1.5 m, so most are met.
+        s = rng.uniform(0.0, 1.5)
+        turn = w / abs(v) * s                      # heading change after s metres
+        cx, cy = radius * math.sin(turn), radius * (1.0 - math.cos(turn))
+        point = (cx + rng.uniform(-0.6, 0.6), cy + rng.uniform(-0.5, 0.5))
+        # A point within 2 mm of the circle the outer front corner sweeps is only grazed;
+        # 2 mm steps cannot tell whether they touch.
+        outer_corner = math.hypot(HL, abs(radius) + half_width)
+        if abs(math.hypot(point[0], point[1] - radius) - outer_corner) < 0.002:
+            continue
+        simulated = first_contact_by_simulation(point, v, w, HL, half_width)
+        computed = float(_arc_contact_distances(np.array([point]), v, w, HL, half_width)[0])
+        if simulated > 2.5 and computed > 2.5:
+            continue                     # never reached within the horizon either way
+        checked += 1
+        assert computed == pytest.approx(simulated, abs=0.01), (radius, v, point)
+    assert checked > 500
+
+
+def test_on_the_inside_of_a_turn_the_front_arrives_sooner_than_on_the_centre_line():
+    # 0.6 m left turn. A point 0.25 m inside the centre path and one 0.25 m outside it,
+    # both 0.45 m round the arc: the inside one is met first.
+    radius = 0.6
+    gate_inside = gate(SafetyMonitor(), 0.0, [(0.40, 0.17)], v=0.3, w=0.3 / radius,
+                       measured=(0.0, 0.0))
+    gate_outside = gate(SafetyMonitor(), 0.0, [(0.50, -0.17)], v=0.3, w=0.3 / radius,
+                        measured=(0.0, 0.0))
+    assert gate_inside.gap is not None and gate_outside.gap is not None
+    assert gate_inside.gap < gate_outside.gap
+
+
 # -- the protective stop ----------------------------------------------------------------------
 
 

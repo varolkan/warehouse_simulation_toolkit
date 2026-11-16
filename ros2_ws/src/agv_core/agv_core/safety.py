@@ -368,8 +368,10 @@ class SafetyMonitor:
     def _turning_on_the_spot(self, v: float, w: float) -> bool:
         if abs(w) <= _W_EPS:
             return False
-        # The turning centre lies inside the vehicle: its corners swing, it goes nowhere.
-        return abs(v) <= _V_EPS or abs(v / w) < self.vehicle.half_width
+        # The turning centre lies inside the vehicle (or its side margin): its corners
+        # swing, it goes nowhere.
+        return (abs(v) <= _V_EPS
+                or abs(v / w) <= self.vehicle.half_width + self.config.side_margin)
 
     def _protective_length(self, v: float, w: float) -> float:
         cfg = self.config
@@ -399,11 +401,15 @@ class SafetyMonitor:
 
     def _path_reach(self, points: np.ndarray, v: float, w: float) -> Optional[float]:
         cfg, veh = self.config, self.vehicle
-        along, across, outer_extra = _path_coordinates(points, v, w, veh)
-        inside = ((across <= veh.half_width + cfg.side_margin + outer_extra)
-                  & (across >= -(veh.half_width + cfg.side_margin))
-                  & (along > -veh.half_length) & (along < veh.half_length + cfg.horizon))
-        gaps = along[inside] - veh.half_length
+        if abs(w) <= _W_EPS or abs(v / w) > _STRAIGHT_RADIUS:
+            along, across, _ = _path_coordinates(points, v, w, veh)
+            inside = ((across <= veh.half_width + cfg.side_margin)
+                      & (along > -veh.half_length) & (along < veh.half_length + cfg.horizon))
+            gaps = along[inside] - veh.half_length
+        else:
+            gaps = _arc_contact_distances(points, v, w, veh.half_length,
+                                          veh.half_width + cfg.side_margin)
+            gaps = gaps[gaps < cfg.horizon]
         if gaps.size < cfg.min_points:
             return None
         # The min_points-th nearest: a single stray return does not set the distance.
@@ -490,6 +496,60 @@ def _path_coordinates(points: np.ndarray, v: float, w: float,
     outer_extra = (math.hypot(abs(radius) + vehicle.half_width, vehicle.half_length)
                    - abs(radius) - vehicle.half_width)
     return along, across, outer_extra
+
+
+def _arc_contact_distances(points: np.ndarray, v: float, w: float, half_length: float,
+                           half_width: float) -> np.ndarray:
+    """How far the centre can travel along the arc (v, w) before the outline meets each point.
+
+    The outline is the rectangle +-half_length by +-half_width. The vehicle turns about
+    C = (0, v/w); a point at distance rho from C is first reached by the part of the outline
+    that leads at that radius: the inner side for radii between the inner side and the
+    inner front corner, the front face from there out to the outer front corner. Points
+    nearer C than the inner side, or further than the outer front corner, are never
+    reached. Just outside the outer side the rear corner swings into them; behind the
+    vehicle the front meets them after going round, within one turn. Points already inside
+    the outline are at 0.
+    """
+    x, y = points[:, 0].copy(), points[:, 1].copy()
+    if v < 0.0:                     # backing up: the rear leads; mirror front and back
+        x, v, w = -x, -v, -w
+    if w < 0.0:                     # turning right: mirror left and right
+        y, w = -y, -w
+    radius = v / w                  # now a left turn about (0, radius), radius > 0
+    dx, dy = x, y - radius
+    rho = np.hypot(dx, dy)
+    # Angle of each point round C from the vehicle's centre, in the direction of travel.
+    phi = np.arctan2(dy, dx) + math.pi / 2.0
+    phi = (phi + math.pi) % (2.0 * math.pi) - math.pi
+    inner = radius - half_width
+    inner_corner = math.hypot(half_length, inner)
+    outer_corner = math.hypot(half_length, radius + half_width)
+    lead = np.full(rho.shape, np.nan)
+    side = (rho >= inner) & (rho < inner_corner)
+    lead[side] = np.arctan2(np.sqrt(np.maximum(rho[side] ** 2 - inner ** 2, 0.0)), inner)
+    face = (rho >= inner_corner) & (rho <= outer_corner)
+    lead[face] = np.arcsin(np.clip(half_length / rho[face], -1.0, 1.0))
+    reached = np.isfinite(lead)
+    # Beyond the outer side the outline at radius rho is only its front and rear ends:
+    # angles [beta, lead] and [-lead, -beta]. A point between them, just outside the side,
+    # is met by the rear end coming round.
+    beta = np.zeros(rho.shape)
+    bulge = reached & (rho > radius + half_width)
+    beta[bulge] = np.arctan2(
+        np.sqrt(np.maximum(rho[bulge] ** 2 - (radius + half_width) ** 2, 0.0)),
+        radius + half_width)
+    distances = np.full(rho.shape, np.inf)
+    ahead = reached & (phi > lead)
+    distances[ahead] = radius * (phi[ahead] - lead[ahead])
+    covered = reached & (np.abs(phi) >= beta) & (np.abs(phi) <= lead)
+    distances[covered] = 0.0
+    beside = bulge & (np.abs(phi) < beta)
+    distances[beside] = radius * (phi[beside] + beta[beside])
+    # A point behind the rear is met by the front only after going round, within a turn.
+    behind = reached & (phi < -lead)
+    distances[behind] = radius * (phi[behind] + 2.0 * math.pi - lead[behind])
+    return distances
 
 
 def _outline_radius_table(vehicle: Vehicle, margin: float) -> np.ndarray:

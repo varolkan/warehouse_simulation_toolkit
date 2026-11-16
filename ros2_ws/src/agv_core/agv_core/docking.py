@@ -39,6 +39,10 @@ class DockingConfig:
     heading_gain: float = 2.0            # rad/s per radian of heading error
     max_turn_rate: float = 0.6
     min_turn_rate: float = 0.08          # below this a turn on the spot does not move the drive
+    # Driving in, the vehicle steers on curves no tighter than this. At a crawl a small
+    # heading correction is otherwise a tight arc, which swings the front corner sideways
+    # into whatever stands beside the run, and the safety gate rightly stops it.
+    min_turn_radius: float = 0.6
 
     align_tolerance: float = math.radians(12.0)    # worse than this: stop and turn first
     position_tolerance: float = 0.02               # off the centre line when docked
@@ -123,7 +127,8 @@ class DockingController:
                     return DockingCommand(0.0, self._turn(error), self.phase, remaining,
                                           offset, heading)
                 speed = max(cfg.min_speed, min(cfg.max_speed, cfg.speed_gain * remaining))
-                turn = max(-cfg.max_turn_rate, min(cfg.max_turn_rate, cfg.heading_gain * error))
+                limit = min(cfg.max_turn_rate, speed / cfg.min_turn_radius)
+                turn = max(-limit, min(limit, cfg.heading_gain * error))
                 return DockingCommand(speed, turn, self.phase, remaining, offset, heading)
 
         # Settle: on the line, turn to the station's heading.
