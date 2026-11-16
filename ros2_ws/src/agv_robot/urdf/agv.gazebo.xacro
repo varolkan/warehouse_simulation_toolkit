@@ -139,14 +139,15 @@
 
     <!--
       Holds the load on the deck. The joint is made between the vehicle and the load model
-      wherever the two are when "attach" arrives, so sim_load_node first puts the load on
-      the deck and then attaches it.
+      wherever the two are when "attach" arrives, so sim_agv (agv_gazebo) first puts the
+      load on the deck and then attaches it.
 
-      Two things about this system decide how the simulation starts. It attaches by itself
-      as soon as both models exist, so sim_load_node's first act is to detach again. And
-      while the load model is missing it warns on every physics step, so the load is
-      spawned before the vehicle, and a vehicle that will carry nothing (load_joint:=false,
-      as for a mapping run) gets no joint at all.
+      Three things about this system decide how the simulation starts. It attaches by
+      itself as soon as both models exist, so sim_agv's first act is to detach again. It
+      reports the joint's state only when the state changes, so sim_agv asks until it hears
+      the answer. And while the load model is missing it warns on every physics step, so
+      the load is spawned before the vehicle, and a vehicle that will carry nothing
+      (load_joint:=false, as for a mapping run) gets no joint at all.
     -->
     <xacro:if value="${load_joint}">
       <gazebo>

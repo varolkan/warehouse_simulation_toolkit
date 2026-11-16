@@ -4,20 +4,26 @@ Load handler (load/command, load/state). A transfer takes `transfer_time` second
 only done docked at a transfer station: loading takes the tote off that station's stand
 onto the deck, where Gazebo's DetachableJoint holds it; unloading lets go and puts it on
 the stand. How the load moves between stand and deck (rollers, a lift) is not modelled:
-the tote is set down where it goes, half way through the transfer.
+the tote is set down where it goes, half way through the transfer. Gazebo answers a
+request to move a model before it has moved it, so the handler watches the tote's own
+ground truth: it closes the joint only once the tote is on the deck, sends it again if it
+does not arrive, and reports a fault if it never does.
 
 Battery (battery_state). agv_core's BatterySim, driven by the vehicle's true pose from
 Gazebo: it charges only while the vehicle stands docked on a charger's contacts.
 
 Through ros_gz_bridge (agv_gazebo/config/bridge.yaml): ground_truth/odometry, the
-attach/detach topics and joint state of the load, and the world's set_pose service.
+tote's /sim/load/odometry, the attach/detach topics and joint state of the load, and the
+world's set_pose service.
 """
 
+from dataclasses import dataclass
 import math
+from typing import Optional, Tuple
 
 from agv_core.geometry import Pose2D
 from agv_core.simulation import BatterySim, LoadState
-from agv_core.sites import Site
+from agv_core.sites import Site, Station
 from agv_gazebo.world import load_pose_on_stand, load_pose_on_vehicle, WORLD_NAME
 from agv_interfaces.msg import LoadStatus
 from agv_interfaces.srv import LoadCommand
@@ -32,6 +38,25 @@ from std_msgs.msg import Empty, String
 
 DOCKED_WITHIN = 0.10          # metres from a station's docked pose
 DOCKED_HEADING = math.radians(8.0)
+RELEASE_RETRY = 1.0           # seconds between requests to release the load, unanswered
+ARRIVED_WITHIN = 0.03         # metres between where the tote was sent and where it is
+MOVE_TIMEOUT = 1.0            # seconds for Gazebo to show the tote where it was sent
+MOVE_TRIES = 3
+ATTACH_RETRY = 0.5            # seconds between requests to close the joint, unanswered
+
+
+@dataclass
+class Transfer:
+    """One load or unload, from the command to the joint in its final state."""
+
+    action: str                                         # load | unload
+    station: Station
+    started: float
+    target: Optional[Tuple[float, float, float]] = None  # where the tote was sent
+    sent_at: float = -math.inf
+    tries: int = 0
+    arrived: bool = False
+    attach_sent_at: float = -math.inf
 
 
 class SimAgv(Node):
@@ -49,17 +74,22 @@ class SimAgv(Node):
         self.speed = 0.0
         self.distance = 0.0
         self.attached = None            # as Gazebo last reported
+        self.load_pose = None           # (x, y, z) of the tote, and when it was heard
+        self.load_heard = -math.inf
+        self.last_release = -math.inf   # when the load joint was last asked to open
+        self.releases = 0
         self.load_station = load_at or None     # where the load stands, if on a stand
         # With a load in the world, nothing is known until Gazebo says the joint is open:
         # its DetachableJoint closes by itself the moment both models exist. Without one,
         # the vehicle has no joint and an empty deck.
         self.state = LoadState.UNKNOWN if self.load_station else LoadState.EMPTY
-        self.transfer = None            # (action, station, started)
+        self.transfer: Optional[Transfer] = None
         self.battery = BatterySim(level=battery, chargers=[c.pose for c in self.site.chargers])
         self.last_battery_step = None
 
         self.create_subscription(Odometry, 'ground_truth/odometry', self._on_truth, 10)
         self.create_subscription(String, '/agv/load/joint_state', self._on_joint, 10)
+        self.create_subscription(Odometry, '/sim/load/odometry', self._on_load_truth, 10)
         self.attach_pub = self.create_publisher(Empty, '/agv/load/attach', 10)
         self.detach_pub = self.create_publisher(Empty, '/agv/load/detach', 10)
         self.state_pub = self.create_publisher(LoadStatus, 'load/state', 10)
@@ -91,6 +121,11 @@ class SimAgv(Node):
         if attached != self.attached:
             self.get_logger().info(f'load joint {msg.data}')
         self.attached = attached
+
+    def _on_load_truth(self, msg: Odometry) -> None:
+        p = msg.pose.pose.position
+        self.load_pose = (p.x, p.y, p.z)
+        self.load_heard = self.now()
 
     # -- the load handler ------------------------------------------------------------------
 
@@ -125,10 +160,11 @@ class SimAgv(Node):
             response.accepted = False
             response.message = f"no load on the stand at '{station.name}' (it is {where})"
             return response
-        self.transfer = (action, station, self.now(), False)
+        self.transfer = Transfer(action, station, self.now())
         self.state = LoadState.MOVING
         if action == 'unload':
             self.detach_pub.publish(Empty())
+            self.last_release = self.now()
         response.accepted, response.message = True, ''
         self.get_logger().info(f"{action} at '{station.name}'")
         return response
@@ -139,37 +175,91 @@ class SimAgv(Node):
             if self.attached is False:
                 self.state = LoadState.EMPTY
                 self.get_logger().info(f"ready: the load is on the stand at '{self.load_station}'")
-            elif self.attached:
+            elif self.attached or now - self.last_release >= RELEASE_RETRY:
                 # DetachableJoint attaches by itself as soon as both models exist: let go.
+                # It reports its state only when the state changes, so the report of that
+                # first attach can be gone before the bridge is up: then ask, until it
+                # answers, at a calmer rate.
                 self.detach_pub.publish(Empty())
+                self.last_release = now
+                self.releases += 1
+                if self.attached is None and self.releases % 10 == 0:
+                    self.get_logger().warn(
+                        f'no word from Gazebo on the load joint after {self.releases} '
+                        'requests to release it: is the bridge running?')
         if self.transfer is not None:
-            action, station, started, moved = self.transfer
-            if not moved and now - started >= self.transfer_time / 2.0:
-                self._move_load(action, station)
-                self.transfer = (action, station, started, True)
-            elif moved and now - started >= self.transfer_time:
-                if action == 'load' and self.attached:
-                    self.state, self.load_station = LoadState.LOADED, None
-                    self.transfer = None
-                elif action == 'unload' and self.attached is False:
-                    self.state, self.load_station = LoadState.EMPTY, station.name
-                    self.transfer = None
-                elif now - started >= self.transfer_time + 5.0:
-                    self.get_logger().error(f'{action} did not complete: the joint is '
-                                            f"{'attached' if self.attached else 'detached'}")
-                    self.state = LoadState.FAULT
-                    self.transfer = None
+            self._advance(self.transfer, now)
         if self.truth is not None:
             dt = 0.0 if self.last_battery_step is None else now - self.last_battery_step
             self.battery.step(max(0.0, dt), self.truth, self.distance, self.speed)
             self.distance = 0.0
             self.last_battery_step = now
 
-    def _move_load(self, action: str, station) -> None:
-        if action == 'load':
+    def _advance(self, transfer: Transfer, now: float) -> None:
+        """Take a transfer one step further: move the tote, then close or open the joint."""
+        elapsed = now - transfer.started
+        if transfer.target is None:
+            if transfer.action == 'unload' and self.attached is not False \
+                    and now - self.last_release >= RELEASE_RETRY:
+                self.detach_pub.publish(Empty())
+                self.last_release = now
+            # Half way through, the tote changes place; to unload, once the joint is open.
+            if elapsed >= self.transfer_time / 2.0 and (
+                    transfer.action == 'load' or self.attached is False):
+                self._send_load(transfer, now)
+            elif elapsed >= self.transfer_time + 5.0:
+                self._fail(f'{transfer.action}: the load joint did not open')
+            return
+        if not transfer.arrived:
+            if self._load_is_at(transfer.target, since=transfer.sent_at):
+                transfer.arrived = True
+            elif now - transfer.sent_at >= MOVE_TIMEOUT:
+                if transfer.tries < MOVE_TRIES:
+                    self._send_load(transfer, now)
+                else:
+                    self._fail(f'{transfer.action}: Gazebo does not show the load where it '
+                               f'was sent, {transfer.tries} times')
+                return
+            else:
+                return
+        if transfer.action == 'load' and not self.attached:
+            if now - transfer.attach_sent_at >= ATTACH_RETRY:
+                self.attach_pub.publish(Empty())
+                transfer.attach_sent_at = now
+        if elapsed < self.transfer_time:
+            return
+        if transfer.action == 'load' and self.attached:
+            self.state, self.load_station = LoadState.LOADED, None
+            self.transfer = None
+        elif transfer.action == 'unload' and self.attached is False:
+            self.state, self.load_station = LoadState.EMPTY, transfer.station.name
+            self.transfer = None
+        elif elapsed >= self.transfer_time + 5.0:
+            self._fail(f'{transfer.action} did not complete: the joint is '
+                       f"{'attached' if self.attached else 'detached'}")
+
+    def _fail(self, why: str) -> None:
+        self.get_logger().error(why)
+        self.state = LoadState.FAULT
+        self.transfer = None
+
+    def _load_is_at(self, target, since: float) -> bool:
+        if self.load_pose is None or self.load_heard <= since:
+            return False
+        x, y, z = self.load_pose
+        return (math.hypot(x - target[0], y - target[1]) <= ARRIVED_WITHIN
+                and abs(z - target[2]) <= ARRIVED_WITHIN)
+
+    def _send_load(self, transfer: Transfer, now: float) -> None:
+        if transfer.action == 'load':
             x, y, z, yaw = load_pose_on_vehicle(self.truth)
         else:
-            x, y, z, yaw = load_pose_on_stand(station)
+            x, y, z, yaw = load_pose_on_stand(transfer.station)
+        transfer.target, transfer.sent_at = (x, y, z), now
+        transfer.tries += 1
+        if transfer.tries > 1:
+            self.get_logger().warn(f'the load is not where it was sent: sending it again '
+                                   f'({transfer.tries} of {MOVE_TRIES})')
         request = SetEntityPose.Request()
         request.entity.name = self.load_model
         request.entity.type = request.entity.MODEL
@@ -177,9 +267,7 @@ class SimAgv(Node):
         request.pose.position.z = z + 0.005
         request.pose.orientation.z = math.sin(yaw / 2)
         request.pose.orientation.w = math.cos(yaw / 2)
-        future = self.set_pose.call_async(request)
-        if action == 'load':
-            future.add_done_callback(lambda f: self.attach_pub.publish(Empty()))
+        self.set_pose.call_async(request)
 
     def _publish(self) -> None:
         stamp = self.get_clock().now().to_msg()

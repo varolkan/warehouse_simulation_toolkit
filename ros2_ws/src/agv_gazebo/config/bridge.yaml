@@ -62,6 +62,12 @@
   gz_type_name: gz.msgs.StringMsg
   direction: GZ_TO_ROS
 
+- ros_topic_name: /sim/load/odometry
+  gz_topic_name: /load/ground_truth
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.Odometry
+  direction: GZ_TO_ROS
+
 - service_name: /world/warehouse/set_pose
   ros_type_name: ros_gz_interfaces/srv/SetEntityPose
   gz_req_type_name: gz.msgs.Pose
