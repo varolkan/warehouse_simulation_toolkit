@@ -15,10 +15,15 @@ if(BUILD_TESTING)
   file(GLOB test_files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} test/test_*.py)
   foreach(test_file ${test_files})
     get_filename_component(test_name ${test_file} NAME_WE)
+    # The closed-loop scenarios drive some 40 whole orders: a few minutes on a laptop.
+    set(test_timeout 300)
+    if(test_name STREQUAL "test_scenarios")
+      set(test_timeout 1800)
+    endif()
     ament_add_pytest_test(${test_name} ${test_file}
       PYTHON_EXECUTABLE ${Python3_EXECUTABLE}
       APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
-      TIMEOUT 120)
+      TIMEOUT ${test_timeout})
   endforeach()
 endif()
 

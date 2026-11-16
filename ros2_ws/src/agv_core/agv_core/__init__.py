@@ -10,6 +10,10 @@ Modules:
   masks        keep-out and speed-limit masks for Nav2's costmap filters
   vehicle      the vehicle's dimensions and limits
   safety       LiDAR protective and warning fields, e-stop, watchdogs, command gate
+  docking      the last metre into a station
+  battery      battery model and range
+  mission      the transport order state machine
+  simulation   kinematic vehicle, simulated scanner, load handler and battery for tests
 """
 
 __version__ = '1.0.0'
