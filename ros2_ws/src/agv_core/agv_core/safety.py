@@ -9,8 +9,9 @@ out. What comes out is the command, unless:
                itself move stands still.
   protective   something is inside the protective field, the part of the vehicle's path it
                could only just stop within from the speed it is doing now. The command
-               becomes zero at once, and stays zero until the field has been clear for
-               `restart_delay` (ISO 3691-4 asks for 2 s before an automatic restart).
+               becomes zero at once, and stays zero until the field of the motion it is
+               asked to resume has been clear for `restart_delay` (ISO 3691-4 asks for a
+               delay before an automatic restart; 2 s here).
   slow         something is further along the path. The speed is cut to the one from which
                the vehicle would stop comfortably `standoff` short of it, so it arrives at
                an obstacle slowly instead of braking hard in front of it.
@@ -265,8 +266,13 @@ class SafetyMonitor:
 
         if violation is None and wants_motion and gap is not None:
             floor = cfg.turn_standoff if kind == 'turn' else cfg.standoff
+            if self._protective_since is not None:
+                # Held after a protective stop: the field that has to be clear is the one
+                # of the motion being asked for, not the vehicle's while it stands still.
+                # Otherwise the wait can run out while whoever stopped it is still there.
+                floor = self._protective_length(v_req, w_req)
             if gap < floor:
-                # Standing next to something and asked to drive into it.
+                # Asked to drive into something it could not stop short of.
                 violation = _describe(kind, gap, v_req)
 
         if violation is not None:

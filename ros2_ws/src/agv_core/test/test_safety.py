@@ -250,6 +250,30 @@ def test_coming_back_into_the_field_restarts_the_wait():
     assert gate(monitor, 1.6 + CFG.restart_delay + 0.1, v=1.0, measured=(0.0, 0.0)).v == 1.0
 
 
+def test_after_a_stop_the_wait_starts_when_the_person_has_left():
+    """Stopped 15 cm short of someone: held while they stand there, released 2 s after they go."""
+    monitor = SafetyMonitor()
+    assert gate(monitor, 0.0, [ahead(0.3)], v=0.8, measured=(0.8, 0.0)).state.stopped
+    # Standing still now, 15 cm from them, still asked for 0.8 m/s: the stop holds.
+    for now in (0.5, 2.5, 5.0, 9.9):
+        status = gate(monitor, now, [ahead(0.15)], v=0.8, measured=(0.0, 0.0))
+        assert status.state is SafetyState.PROTECTIVE_STOP and status.v == 0.0
+    # Last seen at 9.9 s; they step aside before the next scan.
+    assert gate(monitor, 10.0, v=0.8, measured=(0.0, 0.0)).state.stopped
+    assert gate(monitor, 11.85, v=0.8, measured=(0.0, 0.0)).state.stopped
+    assert gate(monitor, 11.95, v=0.8, measured=(0.0, 0.0)).v == 0.8
+
+
+def test_after_a_stop_a_slow_request_needs_only_its_own_room():
+    """The docking crawl: asked for 5 cm/s, a stand 15 cm ahead does not hold the vehicle."""
+    monitor = SafetyMonitor()
+    gate(monitor, 0.0, [ahead(0.05)], v=0.3, measured=(0.0, 0.0))
+    for now in (0.5, 1.0, 1.5):
+        assert gate(monitor, now, [ahead(0.15)], v=0.05, measured=(0.0, 0.0)).state.stopped
+    status = gate(monitor, 2.1, [ahead(0.15)], v=0.05, measured=(0.0, 0.0))
+    assert not status.state.stopped and status.v > 0.0
+
+
 def test_a_standing_vehicle_will_not_start_into_something_touching_it():
     monitor = SafetyMonitor()
     status = gate(monitor, 0.0, [ahead(CFG.standoff - 0.03)], v=0.3, measured=(0.0, 0.0))
