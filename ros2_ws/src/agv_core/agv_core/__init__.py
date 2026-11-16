@@ -9,6 +9,7 @@ Modules:
   grid         occupancy grids: map files, inflation, ray casting, A*
   masks        keep-out and speed-limit masks for Nav2's costmap filters
   vehicle      the vehicle's dimensions and limits
+  safety       LiDAR protective and warning fields, e-stop, watchdogs, command gate
 """
 
 __version__ = '1.0.0'
