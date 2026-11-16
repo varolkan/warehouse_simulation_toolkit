@@ -240,7 +240,10 @@ planner_server:
     costmap_update_timeout: 1.0
     planner_plugins: ["GridBased"]
     # Cost-aware A* on the 5 cm grid: prefers the middle of an aisle to its edge, and
-    # treats keep-out zones and unknown space as walls.
+    # treats keep-out zones and unknown space as walls. It plans for the vehicle's centre
+    # (cells at or above the inscribed cost are walls); the controller and the safety gate
+    # look after the corners. Some builds print "Inflation layer either not found..." at
+    # start-up: that look-up is for footprint checks the 2D planner does not make.
     GridBased:
       plugin: "nav2_smac_planner::SmacPlanner2D"
       tolerance: 0.15

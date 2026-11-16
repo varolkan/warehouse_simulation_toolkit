@@ -1,0 +1,36 @@
+# Carry a load from one station to another.
+#
+# Goals are always accepted. One that cannot be carried out (an unknown station, no route,
+# a battery too low, the vehicle busy) comes back as an aborted result with the reason in
+# `message`. Cancelling sends the vehicle to its charger, finishing a transfer already
+# under way first.
+
+# Station to collect the load at. Empty: the load is on the vehicle already.
+string pickup
+# Station to deliver it to.
+string dropoff
+# Go to the charger after the delivery.
+bool return_to_charger
+---
+# The order was carried out.
+bool success
+# The load reached the dropoff (also true when only the way back to the charger failed).
+bool delivered
+# delivered | refused | failed | canceled
+string outcome
+string message
+# Seconds from the order to its end, and metres driven.
+float64 duration
+float64 distance
+---
+# checking | to_pickup | docking | loading | to_dropoff | unloading | to_charger
+string state
+string detail
+# Station the vehicle is heading for, or docking at.
+string station
+bool carrying
+# Why the order is held (e-stop, safety fault, operator driving, position lost), if it is.
+string holding
+float64 distance_remaining
+float64 distance_driven
+float64 elapsed

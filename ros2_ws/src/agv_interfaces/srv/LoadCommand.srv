@@ -1,0 +1,8 @@
+# Ask the load handler to take a load on board or put it down.
+# load | unload
+string action
+# The station the vehicle is docked at, for handlers that need to know.
+string station
+---
+bool accepted
+string message
