@@ -1,0 +1,66 @@
+# Build the workspace and run every test and linter in it, on ROS 2 Jazzy.
+#
+# The launch tests start the whole stack (AMCL, Nav2, the safety gate, the mission) on the
+# dry run's stand-in vehicle and drive orders through it in real time: no Gazebo, no GPU.
+# The Gazebo scenarios in tools/ need a renderer and are run by hand (see the README).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          rosdep update --rosdistro jazzy
+          rosdep install --from-paths ros2_ws/src --ignore-src -y --rosdistro jazzy
+
+      - name: Build
+        working-directory: ros2_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --event-handlers console_cohesion+
+
+      - name: Lint the tools
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          ament_flake8 tools
+
+      - name: Test
+        working-directory: ros2_ws
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          # The launch tests talk over DDS: keep them to this container and to themselves.
+          export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+          export ROS_DOMAIN_ID=$((RANDOM % 100 + 1))
+          colcon test --event-handlers console_cohesion+ --return-code-on-test-failure
+          colcon test-result --verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results
+          path: |
+            ros2_ws/build/*/test_results/
+            ros2_ws/log/latest_test/
+          if-no-files-found: ignore
