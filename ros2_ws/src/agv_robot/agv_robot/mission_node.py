@@ -15,6 +15,9 @@ Publishes:
   cmd_vel_dock              geometry_msgs/Twist      docking commands, through the safety gate
 Calls:
   load/command              agv_interfaces/srv/LoadCommand
+  global_costmap/clear_except_global_costmap
+                            nav2_msgs/srv/ClearCostmapExceptRegion
+                            when a route check finds no route: once, then it asks again
 
 Every decision is agv_core.mission.Mission's. This node keeps it fed: it gathers what is
 known, runs one cycle at `rate` Hz, and carries out what comes back. Parameters: `site`,
@@ -41,6 +44,7 @@ from agv_robot.params import declare_config, stamp_seconds
 from agv_robot.paths import site_file
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
+from nav2_msgs.srv import ClearCostmapExceptRegion
 import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import ExternalShutdownException
@@ -55,6 +59,13 @@ SAFETY_STATES = {state.value: state for state in SafetyState}
 # up yet. The request is made again, within the mission's route_check_timeout.
 TRANSIENT_PATH_ERRORS = (202, 207)
 ROUTE_RETRY_PERIOD = 0.5
+# Planner answers that can come from an obstacle the global costmap still remembers after it
+# has gone: a pallet that was moved while the scanner could not see it. The route check then
+# clears what the costmap remembers away from the vehicle, waits for it to be drawn again,
+# and asks once more. A route that is really closed is refused all the same.
+OBSTRUCTED_PATH_ERRORS = (205, 206, 208)
+KEEP_AROUND_VEHICLE = 3.0      # m: side of the square round the vehicle that is not cleared
+REDRAW_WAIT = 1.5              # s: more than one update of the global costmap (1 Hz)
 PATH_ERRORS = {
     200: 'unknown error', 201: 'invalid planner', 202: 'no transform',
     203: 'start outside the map', 204: 'goal outside the map', 205: 'start occupied',
@@ -109,6 +120,7 @@ class MissionNode(Node):
         self.route_queue = []          # (not before, request)
         self.route_requests = {}       # request id -> request, while it is being answered
         self.route_busy = False
+        self.route_cleared = set()     # request ids asked again after a costmap clear
         # The action goal being worked on.
         self.goal_handle = None
         self.goal_future = None
@@ -126,6 +138,8 @@ class MissionNode(Node):
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.path_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
         self.load_client = self.create_client(LoadCommand, 'load/command')
+        self.clear_client = self.create_client(
+            ClearCostmapExceptRegion, 'global_costmap/clear_except_global_costmap')
         self.server = ActionServer(
             self, Transport, 'transport', execute_callback=self._execute,
             goal_callback=lambda goal: GoalResponse.ACCEPT,
@@ -351,24 +365,45 @@ class MissionNode(Node):
             return
         error = ''
         if response is not None:
-            if response.result.error_code in TRANSIENT_PATH_ERRORS:
+            code = response.result.error_code
+            if code in TRANSIENT_PATH_ERRORS:
                 self._route_again(request_id, response.result.error_msg)
                 return
-            error = response.result.error_msg or PATH_ERRORS.get(response.result.error_code, '')
+            if code in OBSTRUCTED_PATH_ERRORS and self._forget_obstacles(request_id):
+                self._route_again(request_id, f'{PATH_ERRORS[code]}; cleared the obstacles '
+                                  'the costmap remembers', REDRAW_WAIT)
+                return
+            error = response.result.error_msg or PATH_ERRORS.get(code, '')
         self._route_done(request_id, RouteReply(None, error or 'no path'))
 
-    def _route_again(self, request_id: int, why: str) -> None:
+    def _forget_obstacles(self, request_id: int) -> bool:
+        """Clear the global costmap away from the vehicle, once per route request.
+
+        Not while driving: the planner is using that costmap.
+        """
+        with self.lock:
+            if request_id in self.route_cleared or self.nav_handle is not None:
+                return False
+            self.route_cleared.add(request_id)
+        if self.clear_client.service_is_ready():
+            request = ClearCostmapExceptRegion.Request()
+            request.reset_distance = KEEP_AROUND_VEHICLE
+            self.clear_client.call_async(request)
+        return True
+
+    def _route_again(self, request_id: int, why: str, wait: float = ROUTE_RETRY_PERIOD) -> None:
         with self.lock:
             request = self.route_requests.pop(request_id, None)
             self.route_busy = False
             if request is not None:
-                self.route_queue.append((self.now() + ROUTE_RETRY_PERIOD, request))
+                self.route_queue.append((self.now() + wait, request))
         self.get_logger().info(f'route check to be repeated: {why}')
 
     def _route_done(self, request_id: int, reply: RouteReply) -> None:
         with self.lock:
             self.routes[request_id] = reply
             self.route_requests.pop(request_id, None)
+            self.route_cleared.discard(request_id)
             self.route_busy = False
 
     # -- the load handler ---------------------------------------------------------------------
