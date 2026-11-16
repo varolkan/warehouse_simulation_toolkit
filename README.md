@@ -202,6 +202,8 @@ ros2 action send_goal --feedback /transport agv_interfaces/action/Transport \
 
 The vehicle starts docked at the charger (`start:=`), the tote on the stand at `inbound` (`load_at:=`). Headless, the default, still renders: the LiDAR is a GPU sensor, so a machine without a display needs EGL or a virtual X server (`Xvfb :1 & export DISPLAY=:1`); software rendering (`LIBGL_ALWAYS_SOFTWARE=1`) is fast enough for real time.
 
+If start-up stops with Nav2's lifecycle manager at `Configuring <node>`, every order is then refused with "the route check did not answer". A service request between the two was lost, which usually follows ROS processes that were killed and left stale Fast DDS shared-memory files behind. Stop everything, run `fastdds shm clean`, and launch again.
+
 ### Verified in Gazebo
 
 Gazebo Harmonic (gz-sim 8.10), ROS 2 Jazzy, Nav2 1.3.13, slam_toolbox 2.8.5, headless with software rendering, real-time factor 0.97 to 1.03. The scenarios are scripted ([`tools/scenarios.py`](tools/scenarios.py)) and run as one chain, each starting where the one before left the vehicle and the tote. The chain ran in two sessions: the tour and the crate in the first; the other four in a second, started with the vehicle docked at `packing` and the tote on its stand, where the crate scenario had left them. Distances to obstacles and docking errors are measured on Gazebo's true pose, not on the vehicle's estimate of it.
