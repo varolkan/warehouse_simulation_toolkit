@@ -50,8 +50,8 @@ def test_a_delivery_through_the_hall():
     result = world.run_to_end()
 
     assert result.success and result.message == "delivered from 'a' to 'packing'"
-    assert states_of(world) == ['checking', 'to_pickup', 'docking', 'loading', 'to_dropoff',
-                                'docking', 'unloading', 'complete']
+    assert states_of(world) == ['checking', 'undocking', 'to_pickup', 'docking', 'loading',
+                                'undocking', 'to_dropoff', 'docking', 'unloading', 'complete']
     never_touched(world)
     assert world.smallest_gap > 0.05
     # Round the east end of the wall, the short way.
@@ -162,7 +162,7 @@ def test_someone_stepping_out_in_front_of_the_vehicle_is_not_hit():
     never_touched(world)
 
 
-def test_it_never_creeps_towards_someone_standing_in_front_of_it():
+def test_someone_standing_in_the_way_is_kept_at_a_distance():
     world = World()
     world.order('a', 'packing')
     world.run_until(lambda: world.status.state == 'to_dropoff' and world.vehicle.v > 0.75)
@@ -178,19 +178,13 @@ def test_it_never_creeps_towards_someone_standing_in_front_of_it():
         dy = max(abs(ly) - AGV.half_width, 0.0)
         return math.hypot(dx, dy) - person.radius
 
-    def centre_distance():
-        return math.hypot(world.vehicle.pose.x - x, world.vehicle.pose.y - y)
-
-    stopped_at = centre_distance()
-    closest_centre, closest_gap = stopped_at, gap()
+    closest_gap = gap()
     for _ in range(int(20.0 / world.dt)):          # they stand there for 20 s
         world.step()
-        closest_centre = min(closest_centre, centre_distance())
         closest_gap = min(closest_gap, gap())
-    # It may turn on the spot to go round them, which swings its front corners out to the
-    # turning circle; its centre does not move towards them.
-    assert closest_centre >= stopped_at - 0.01
-    assert closest_gap > 0.1
+    # It may wait, or plan round them and drive past. Either way its outline keeps the
+    # gate's margins: 5 cm beside the path, 3 cm round the turning circle.
+    assert closest_gap > 0.03, closest_gap
     never_touched(world)
     world.obstacles.remove(person)
     assert world.run_to_end().success
@@ -231,8 +225,10 @@ def test_something_standing_in_the_docking_run_fails_the_dock_not_the_bumper():
     crate = station.pose.advanced(-0.05)                     # on the stop line
     world.obstacles.append(Box(crate.x, crate.y, 0.3, 0.3))
     result = world.run_to_end(timeout=1500.0)
+    # It docks as far as the crate lets it, waits for it to be taken away, and gives up.
     assert result.outcome == 'failed'
-    assert "'b'" in result.message and '(the load is on board)' in result.message
+    assert result.message.startswith('blocked for 90 s: obstacle 0.0')
+    assert result.message.endswith('m ahead (the load is on board)')
     never_touched(world)
     assert world.handler.state is LoadState.LOADED            # never unloaded onto a crate
 

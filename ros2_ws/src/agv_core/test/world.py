@@ -280,7 +280,8 @@ class World:
             command = out.velocity
         nav = None if command is None else Command(self.now, command[0], command[1])
         status = self.safety.update(
-            self.now, self._scan, Command(self.now, self.vehicle.v, self.vehicle.w), nav=nav)
+            self.now, self._scan, Command(self.now, self.vehicle.v, self.vehicle.w), nav=nav,
+            docking=out.velocity is not None)
         self.safety_states.append(status)
         self.vehicle.command(status.v, status.w, self.now)
 

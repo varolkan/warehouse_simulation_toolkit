@@ -353,6 +353,49 @@ def test_a_slow_drive_with_a_fast_turn_is_treated_as_turning_on_the_spot():
     assert status.state is SafetyState.SLOW and 'degrees of room' in status.reason
 
 
+# -- the station field set ------------------------------------------------------------------
+
+
+def test_docking_may_come_close_to_a_stand_that_driving_may_not():
+    # 6 cm from the stand, asked for 5 cm/s.
+    driving = gate(SafetyMonitor(), 0.0, [ahead(0.06)], v=0.05, measured=(0.0, 0.0))
+    docking = SafetyMonitor().update(
+        0.0, scan(0.0, ahead(0.06)), Command(0.0, 0.0, 0.0), nav=Command(0.0, 0.05, 0.0),
+        docking=True)
+    assert driving.state is SafetyState.PROTECTIVE_STOP and driving.v == 0.0
+    assert not docking.state.stopped and docking.v == pytest.approx(0.05)
+
+
+def test_docking_still_stops_short_of_the_stand():
+    monitor = SafetyMonitor()
+    for gap, expected_stop in ((0.10, False), (0.05, False), (0.025, True), (0.01, True)):
+        status = monitor.update(0.0, scan(0.0, ahead(gap)), Command(0.0, 0.0, 0.0),
+                                nav=Command(0.0, 0.04, 0.0), docking=True)
+        assert (status.v == 0.0) is expected_stop, (gap, status)
+
+
+def test_docking_is_capped_at_crawling_speed_and_keeps_every_other_rule():
+    cfg = SafetyConfig()
+    fast = SafetyMonitor().update(0.0, scan(0.0), Command(0.0, 0.0, 0.0),
+                                  nav=Command(0.0, 0.8, 0.0), docking=True)
+    assert fast.v == pytest.approx(cfg.dock_max_speed)
+    back = SafetyMonitor().update(0.0, scan(0.0), Command(0.0, 0.0, 0.0),
+                                  nav=Command(0.0, -0.8, 0.0), docking=True)
+    assert back.v == pytest.approx(-cfg.dock_max_speed)
+    estopped = SafetyMonitor()
+    estopped.press_estop()
+    assert estopped.update(0.0, scan(0.0), Command(0.0, 0.0, 0.0),
+                           nav=Command(0.0, 0.05, 0.0), docking=True).state is SafetyState.ESTOP
+    assert SafetyMonitor().update(0.0, None, Command(0.0, 0.0, 0.0),
+                                  nav=Command(0.0, 0.05, 0.0),
+                                  docking=True).state is SafetyState.FAULT
+    # And afterwards the normal fields apply again.
+    monitor = SafetyMonitor()
+    monitor.update(0.0, scan(0.0, ahead(0.06)), Command(0.0, 0.0, 0.0),
+                   nav=Command(0.0, 0.05, 0.0), docking=True)
+    assert monitor.config.standoff == cfg.standoff
+
+
 # -- faults -----------------------------------------------------------------------------------
 
 

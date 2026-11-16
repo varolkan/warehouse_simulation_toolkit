@@ -27,6 +27,7 @@ belongs in a safety-rated scanner wired to the drive's safe-torque-off, and this
 the layer above it.
 """
 
+import dataclasses
 from dataclasses import dataclass, field
 import enum
 import math
@@ -84,6 +85,20 @@ class SafetyConfig:
     command_timeout: float = 0.5   # an old command is no command
     manual_timeout: float = 0.5    # how long the operator keeps control after a command
     restart_delay: float = 2.0     # clear time before moving again after a protective stop
+
+    # The station field set, used while the docking controller drives: the vehicle is
+    # meant to come up close to a stand there, slowly. Everything else stays as it is.
+    dock_standoff: float = 0.02
+    dock_warning_time: float = 0.3
+    dock_creep_speed: float = 0.02
+    dock_max_speed: float = 0.25
+
+    def docking(self) -> 'SafetyConfig':
+        """Return this configuration with the station field set in place."""
+        return dataclasses.replace(
+            self, standoff=self.dock_standoff, warning_time=self.dock_warning_time,
+            creep_speed=self.dock_creep_speed, max_speed=min(self.max_speed, self.dock_max_speed),
+            max_reverse_speed=min(self.max_reverse_speed, self.dock_max_speed))
 
     def stopping_distance(self, speed: float) -> float:
         speed = abs(speed)
@@ -182,6 +197,7 @@ class SafetyMonitor:
         self._last_v = 0.0
         self._last_w = 0.0
         self._outline_radius = _outline_radius_table(vehicle, config.turn_margin)
+        self._docking_config = config.docking()
 
     # -- e-stop ----------------------------------------------------------------------
 
@@ -215,12 +231,26 @@ class SafetyMonitor:
     # -- the cycle ---------------------------------------------------------------------
 
     def update(self, now: float, scan: Optional[Scan], measured: Optional[Command],
-               nav: Optional[Command] = None, manual: Optional[Command] = None) -> SafetyStatus:
+               nav: Optional[Command] = None, manual: Optional[Command] = None,
+               docking: bool = False) -> SafetyStatus:
         """Decide what the drive gets.
 
         `measured` is the odometry's velocity; `nav` and `manual` are the latest commands
         from the navigation stack and from an operator. A fresh manual command wins.
+        With `docking`, `nav` comes from the docking controller and the station field set
+        applies (see SafetyConfig.docking).
         """
+        if not docking:
+            return self._update(now, scan, measured, nav, manual)
+        normal = self.config
+        self.config = self._docking_config
+        try:
+            return self._update(now, scan, measured, nav, manual)
+        finally:
+            self.config = normal
+
+    def _update(self, now: float, scan: Optional[Scan], measured: Optional[Command],
+                nav: Optional[Command], manual: Optional[Command]) -> SafetyStatus:
         cfg = self.config
         source, v_req, w_req = self._arbitrate(now, nav, manual)
 

@@ -104,6 +104,8 @@ class MissionConfig:
     dock_attempts: int = 3
     dock_timeout: float = 45.0
     charge_contact_timeout: float = 8.0    # for current to flow once docked at a charger
+    undock_speed: float = 0.15             # backing out of a station
+    undock_timeout: float = 20.0
 
     # Transfers.
     load_attempts: int = 3
@@ -226,6 +228,13 @@ class _Dock:
     attempts: int = 0
     controller: Optional[DockingController] = None
     docked_at: Optional[float] = None
+
+
+@dataclass
+class _Undock:
+    """Back straight out of a station to its approach pose, where there is room to turn."""
+
+    station: Station
 
 
 @dataclass
@@ -488,6 +497,8 @@ class Mission:
                 finished = self._travel(step, inputs, out)
             elif isinstance(step, _Dock):
                 finished = self._dock(step, inputs, out)
+            elif isinstance(step, _Undock):
+                finished = self._undock(step, inputs, out)
             else:
                 finished = self._transfer(step, inputs, out)
             if not finished:
@@ -605,6 +616,12 @@ class Mission:
             there = self._at(inputs.pose, target) or is_docked(inputs.pose, step.station.pose)
             if there and not step.forced:
                 return True
+            inside = self._in_docking_run(inputs.pose)
+            if inside is not None:
+                # Docked, or part way in: back out before navigation turns the vehicle.
+                self._plan.insert(self._index, _Undock(inside))
+                self._step_time = 0.0
+                return False
             self._send_goal(step, inputs, out)
             return False
         if step.wait_until is not None:
@@ -640,6 +657,34 @@ class Mission:
         step.sent_at = inputs.now
         self._step_time = 0.0
         out.navigate = NavGoal(step.goal_id, step.station.approach_pose, step.station.name)
+
+    def _in_docking_run(self, pose: Optional[Pose2D]) -> Optional[Station]:
+        """Return the station whose docking run the vehicle stands in, if any."""
+        if pose is None:
+            return None
+        for station in self.site.stations.values():
+            local = pose.relative_to(station.pose)
+            if (-(station.approach - 0.05) < local.x < 0.10 and abs(local.y) < 0.25
+                    and abs(local.yaw) < math.radians(30.0)):
+                return station
+        return None
+
+    def _undock(self, step: _Undock, inputs: MissionInputs, out: MissionOutputs) -> bool:
+        cfg = self.config
+        local = inputs.pose.relative_to(step.station.pose)
+        to_go = step.station.approach + local.x          # metres still to back out
+        if to_go <= 0.02:
+            out.velocity = (0.0, 0.0)
+            return True
+        if self._step_time > cfg.undock_timeout:
+            self._fail(inputs, f"could not back out of '{step.station.name}' in "
+                       f'{cfg.undock_timeout:.0f} s', out)
+            return False
+        speed = max(0.05, min(cfg.undock_speed, 0.8 * to_go))
+        # Hold the station's heading while backing out.
+        turn = max(-0.3, min(0.3, -1.5 * local.yaw))
+        out.velocity = (-speed, turn)
+        return False
 
     def _travel_failed(self, step: _Travel, inputs: MissionInputs, out: MissionOutputs,
                        reason: str) -> bool:
@@ -907,6 +952,9 @@ class Mission:
                 state = 'docking'
                 detail = (f"waiting for charging current at '{station}'" if step.docked_at
                           else f"docking at '{station}'")
+            elif isinstance(step, _Undock):
+                state = 'undocking'
+                detail = f"backing out of '{station}'"
             else:
                 state = 'loading' if step.action == 'load' else 'unloading'
                 detail = f"{state} at '{station}' (command {step.attempts} of " \

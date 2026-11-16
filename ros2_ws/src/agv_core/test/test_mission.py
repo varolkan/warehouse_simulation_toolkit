@@ -31,8 +31,9 @@ def test_a_delivery_from_one_station_to_another():
 
     assert result.outcome == 'delivered' and result.success and result.delivered
     assert result.message == "delivered from 'a' to 'b'"
-    assert rig.states == ['checking', 'to_pickup', 'docking', 'loading', 'to_dropoff',
-                          'docking', 'unloading', 'complete']
+    # It backs out of the charger, and out of the pickup, before driving off.
+    assert rig.states == ['checking', 'undocking', 'to_pickup', 'docking', 'loading',
+                          'undocking', 'to_dropoff', 'docking', 'unloading', 'complete']
     # Navigation was sent to the two approach poses, 0.8 m short of each station.
     assert [goal.station for goal in rig.goals] == ['a', 'b']
     assert (rig.goals[0].pose.x, rig.goals[0].pose.y) == pytest.approx((9.2, 0.0))
@@ -45,7 +46,7 @@ def test_a_delivery_from_one_station_to_another():
     offset, heading, _ = rig.docking_error('b')
     assert offset < 0.02 and heading < 1.5
     assert result.distance == pytest.approx(rig.vehicle.distance, abs=0.2)
-    assert 17.0 < result.distance < 19.5          # 9.2 m, 0.8 m, 7.3 m, 0.8 m
+    assert 18.6 < result.distance < 21.1          # 0.8 m back, 8.4, 0.8 in; 0.8 back, 7.3, 0.8 in
     assert 30.0 < result.duration < 80.0
     assert rig.cancels == 0
 
@@ -77,7 +78,7 @@ def test_a_delivery_that_returns_to_the_charger():
     rig = started('a', 'b', return_to_charger=True)
     result = rig.run_to_end()
     assert result.success and result.message == "delivered from 'a' to 'b', back at the charger"
-    assert rig.states[-4:] == ['unloading', 'to_charger', 'docking', 'complete']
+    assert rig.states[-5:] == ['unloading', 'undocking', 'to_charger', 'docking', 'complete']
     assert [goal.station for goal in rig.goals] == ['a', 'b', 'charger']
     assert rig.docked_at('charger') and rig.inputs().charging
 
@@ -87,7 +88,7 @@ def test_a_pickup_where_the_vehicle_already_stands_needs_no_drive():
     result = rig.run_to_end()
     assert result.success
     assert [goal.station for goal in rig.goals] == ['b']
-    assert rig.states[:3] == ['checking', 'loading', 'to_dropoff']
+    assert rig.states[:4] == ['checking', 'loading', 'undocking', 'to_dropoff']
 
 
 def test_already_at_the_approach_pose_it_goes_straight_to_docking():
@@ -102,7 +103,8 @@ def test_an_order_without_a_pickup_delivers_the_load_already_on_board():
     result = rig.run_to_end()
     assert result.success and result.message == "delivered to 'b'"
     assert [(c.action, c.station) for c in rig.load_commands] == [('unload', 'b')]
-    assert rig.states == ['checking', 'to_dropoff', 'docking', 'unloading', 'complete']
+    assert rig.states == ['checking', 'undocking', 'to_dropoff', 'docking', 'unloading',
+                          'complete']
 
 
 def test_one_order_after_another():
@@ -225,17 +227,20 @@ def test_an_order_longer_than_the_battery_lasts_is_refused():
 def test_without_route_checks_the_order_starts_at_once():
     rig = started('a', 'b', config=MissionConfig(check_routes=False))
     rig.step()
-    assert rig.route_requests == [] and [goal.station for goal in rig.goals] == ['a']
+    assert rig.route_requests == [] and rig.status.state == 'undocking'
     assert rig.run_to_end().success
 
 
 def test_the_route_lengths_set_the_deadline_of_each_leg():
     rig = started('a', 'b')
     rig.nav_stalls = True
+    rig.run_until(lambda: len(rig.goals) == 1)
+    sent = rig.now
     rig.run_until(lambda: len(rig.goals) == 2)
-    # 9.2 m at 0.15 m/s plus 60 s, not the 300 s of an unknown leg.
-    taken = rig.now - 100.0
-    assert taken == pytest.approx(9.2 / 0.15 + 60.0 + rig.config.nav_retry_wait, abs=2.0)
+    # The leg was measured from where the vehicle stood when the order came, 9.2 m: at
+    # 0.15 m/s plus 60 s, not the 300 s of a leg of unknown length; then the retry wait.
+    assert rig.now - sent == pytest.approx(9.2 / 0.15 + 60.0 + rig.config.nav_retry_wait,
+                                           abs=1.0)
 
 
 # -- travel -----------------------------------------------------------------------------------
@@ -286,7 +291,7 @@ def test_the_load_left_on_board_can_be_delivered_by_a_new_order():
 
 
 def test_navigation_that_never_takes_the_goal_fails_the_order():
-    rig = started('a', 'b')
+    rig = started('a', 'b', at=site().station('charger').approach_pose)
     rig.nav_deaf = True
     result = rig.run_to_end()
     assert result.message == "could not reach 'a' in 3 attempts: navigation did not take the goal"
@@ -302,10 +307,10 @@ def test_navigation_that_never_arrives_runs_into_the_leg_deadline():
 
 
 def test_navigation_reporting_success_somewhere_else_is_not_believed():
-    rig = started('a', 'b')
+    rig = started('a', 'b', at=site().station('charger').approach_pose)
     rig.nav_lies = 1
     rig.run_until(lambda: 'trying again' in rig.status.detail)
-    assert 'navigation stopped 9.20 m from the approach pose' in rig.status.detail
+    assert 'navigation stopped 8.40 m from the approach pose' in rig.status.detail
     assert rig.run_to_end().success
 
 
@@ -360,12 +365,29 @@ def test_a_dock_that_never_works_fails_the_order():
     assert rig.load_commands == []                 # never asked for a load it could not reach
 
 
-def test_a_drive_that_does_not_move_runs_into_the_docking_deadline():
+def test_a_drive_that_does_not_move_runs_into_the_docking_and_undocking_deadlines():
     rig = started('a', 'b', config=MissionConfig(dock_timeout=10.0))
     rig.run_until_state('docking')
     rig.drive_dead = True
     result = rig.run_to_end()
-    assert result.message == "could not dock at 'a' in 3 attempts: not docked after 10 s"
+    # The dock times out; the vehicle has to back out for another try, and cannot.
+    details = ' | '.join(s.detail for s in rig.statuses)
+    assert 'not docked after 10 s; approaching again (2 of 3)' in details
+    assert result.message == "could not back out of 'a' in 20 s"
+
+
+def test_a_vehicle_part_way_into_a_station_backs_out_before_driving_off():
+    station = site().station('a')
+    rig = started('', 'b', loaded=True, at=station.pose.advanced(-0.4, 0.05))
+    rig.run_until_state('undocking')
+    backed_out = None
+    while rig.status.state == 'undocking':
+        backed_out = rig.vehicle.pose
+        rig.step()
+    local = backed_out.relative_to(station.pose)
+    assert local.x == pytest.approx(-station.approach, abs=0.03)
+    assert abs(local.y) < 0.06 and abs(local.yaw) < 0.05
+    assert rig.run_to_end().success
 
 
 def test_docking_precision_over_many_arrivals():
@@ -456,7 +478,7 @@ def test_a_load_counts_only_once_the_handler_has_held_it_for_a_moment():
     rig.run_until_state('loading')
     rig.run_until(lambda: rig.handler.state is LoadState.LOADED)
     loaded_at = rig.now
-    rig.run_until_state('to_dropoff')
+    rig.run_until(lambda: rig.status.state != 'loading')
     assert rig.now - loaded_at == pytest.approx(rig.config.load_debounce, abs=0.15)
 
 
