@@ -24,8 +24,7 @@ from agv_interfaces.srv import LoadCommand
 from agv_robot.paths import site_file
 from nav_msgs.msg import Odometry
 import rclpy
-from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from ros_gz_interfaces.srv import SetEntityPose
 from sensor_msgs.msg import BatteryState
@@ -59,16 +58,14 @@ class SimAgv(Node):
         self.battery = BatterySim(level=battery, chargers=[c.pose for c in self.site.chargers])
         self.last_battery_step = None
 
-        group = ReentrantCallbackGroup()
         self.create_subscription(Odometry, 'ground_truth/odometry', self._on_truth, 10)
         self.create_subscription(String, '/agv/load/joint_state', self._on_joint, 10)
         self.attach_pub = self.create_publisher(Empty, '/agv/load/attach', 10)
         self.detach_pub = self.create_publisher(Empty, '/agv/load/detach', 10)
         self.state_pub = self.create_publisher(LoadStatus, 'load/state', 10)
         self.battery_pub = self.create_publisher(BatteryState, 'battery_state', 10)
-        self.set_pose = self.create_client(SetEntityPose, f'/world/{WORLD_NAME}/set_pose',
-                                           callback_group=group)
-        self.create_service(LoadCommand, 'load/command', self._on_command, callback_group=group)
+        self.set_pose = self.create_client(SetEntityPose, f'/world/{WORLD_NAME}/set_pose')
+        self.create_service(LoadCommand, 'load/command', self._on_command)
         self.create_timer(0.1, self._step)
         self.create_timer(0.2, self._publish)
         self.get_logger().info(
@@ -203,14 +200,11 @@ class SimAgv(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = SimAgv()
-    executor = MultiThreadedExecutor(num_threads=2)
-    executor.add_node(node)
     try:
-        executor.spin()
+        rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

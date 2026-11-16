@@ -24,7 +24,6 @@ known, runs one cycle at `rate` Hz, and carries out what comes back. Parameters:
 
 import math
 import threading
-import time
 
 from action_msgs.msg import GoalStatus
 from agv_core.battery import BatteryConfig
@@ -44,9 +43,9 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.task import Future
 from sensor_msgs.msg import BatteryState
 import tf2_ros
 
@@ -112,11 +111,11 @@ class MissionNode(Node):
         self.route_busy = False
         # The action goal being worked on.
         self.goal_handle = None
-        self.goal_result = None
+        self.goal_future = None
+        self.cancel_sent = False
         self.last_status = None
         self.cycles = 0
 
-        clients = ReentrantCallbackGroup()
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.create_subscription(LoadStatus, 'load/state', self._on_load, 10)
@@ -124,18 +123,17 @@ class MissionNode(Node):
         self.create_subscription(SafetyStatus, 'safety/status', self._on_safety, 10)
         self.status_pub = self.create_publisher(MissionStatus, 'mission/status', 10)
         self.dock_pub = self.create_publisher(Twist, 'cmd_vel_dock', 10)
-        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose',
-                                       callback_group=clients)
-        self.path_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose',
-                                        callback_group=clients)
-        self.load_client = self.create_client(LoadCommand, 'load/command', callback_group=clients)
+        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self.path_client = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
+        self.load_client = self.create_client(LoadCommand, 'load/command')
         self.server = ActionServer(
             self, Transport, 'transport', execute_callback=self._execute,
             goal_callback=lambda goal: GoalResponse.ACCEPT,
-            cancel_callback=lambda goal: CancelResponse.ACCEPT,
-            callback_group=ReentrantCallbackGroup())
-        self.create_timer(1.0 / self.rate, self._cycle,
-                          callback_group=MutuallyExclusiveCallbackGroup())
+            cancel_callback=lambda goal: CancelResponse.ACCEPT)
+        # One thread: the action's execute callback is a coroutine that waits for the
+        # cycle to finish the order. Under simulated time the clock wakes every Python node
+        # 250 times a second, and a multi-threaded executor made that cost a core.
+        self.create_timer(1.0 / self.rate, self._cycle)
         stations = ', '.join(self.site.stations)
         self.get_logger().info(f"site '{self.site.name}' from {path}: {stations}")
 
@@ -192,9 +190,15 @@ class MissionNode(Node):
     def _cycle(self) -> None:
         with self.lock:
             inputs = self._inputs()
+            handle = self.goal_handle
+            if handle is not None and handle.is_cancel_requested and not self.cancel_sent:
+                self.mission.cancel()
+                self.cancel_sent = True
+                self.get_logger().info('cancel requested')
             out = self.mission.update(inputs)
-            if out.result is not None:
-                self.goal_result = out.result
+            if out.result is not None and self.goal_future is not None \
+                    and not self.goal_future.done():
+                self.goal_future.set_result(out.result)
             self.last_status = out.status
 
         if out.cancel_navigation:
@@ -215,6 +219,9 @@ class MissionNode(Node):
         self.cycles += 1
         if self.cycles % max(1, int(self.rate / 5.0)) == 0:
             self._publish_status(out.status, inputs)
+        feedback_every = max(1, int(self.rate / 10.0))
+        if handle is not None and out.status.active and self.cycles % feedback_every == 0:
+            handle.publish_feedback(self._feedback(out.status))
 
     def _publish_status(self, status, inputs: MissionInputs) -> None:
         msg = MissionStatus()
@@ -383,13 +390,14 @@ class MissionNode(Node):
 
     # -- the action ---------------------------------------------------------------------------
 
-    def _execute(self, goal_handle):
+    async def _execute(self, goal_handle):
         request = goal_handle.request
         order = Order(request.pickup, request.dropoff, request.return_to_charger)
         with self.lock:
             refusal = self.mission.start(order, self._inputs())
             if refusal is None:
-                self.goal_handle, self.goal_result = goal_handle, None
+                self.goal_handle, self.goal_future = goal_handle, Future()
+                self.cancel_sent = False
         description = (f"from '{order.pickup}' " if order.pickup else '') + f"to '{order.dropoff}'"
         if refusal is not None:
             self.get_logger().warn(f'order {description} refused: {refusal}')
@@ -397,23 +405,10 @@ class MissionNode(Node):
             return self._result(MissionResult('refused', refusal))
         self.get_logger().info(f'order {description} accepted')
 
-        cancel_sent = False
-        result = None
-        while rclpy.ok():
-            with self.lock:
-                result, status = self.goal_result, self.last_status
-            if result is not None:
-                break
-            if goal_handle.is_cancel_requested and not cancel_sent:
-                with self.lock:
-                    self.mission.cancel()
-                cancel_sent = True
-                self.get_logger().info('cancel requested')
-            if status is not None and status.active:
-                goal_handle.publish_feedback(self._feedback(status))
-            time.sleep(0.1)
+        # The cycle publishes feedback, passes on a cancel, and completes this future.
+        result = await self.goal_future
         with self.lock:
-            self.goal_handle, self.goal_result = None, None
+            self.goal_handle, self.goal_future = None, None
         if result is None:
             result = MissionResult('failed', 'shutting down')
         if result.success:
@@ -451,10 +446,8 @@ class MissionNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MissionNode()
-    executor = MultiThreadedExecutor(num_threads=4)
-    executor.add_node(node)
     try:
-        executor.spin()
+        rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
@@ -462,7 +455,6 @@ def main(args=None):
             node.dock_pub.publish(Twist())
         except Exception:  # noqa: BLE001 - the context may already be gone
             pass
-        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
