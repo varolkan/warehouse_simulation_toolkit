@@ -182,7 +182,7 @@ class Rig:
 
     @property
     def states(self):
-        """The states the order went through, without repeats."""
+        """Return the states the order went through, without repeats."""
         seen = []
         for status in self.statuses:
             if not seen or seen[-1] != status.state:
