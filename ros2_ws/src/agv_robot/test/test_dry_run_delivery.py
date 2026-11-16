@@ -54,9 +54,11 @@ class TestDryRunDelivery(unittest.TestCase):
         self.assertGreater(result.distance, 40.0)
         self.assertLess(result.duration, 300.0)
 
-        # Back on the charger: on the contacts, charging, empty.
+        # Back on the charger: on the contacts, charging, empty. The result can arrive before
+        # the status that says so (it is published at 5 Hz): wait for that status.
         self.assertTrue(client.spin_until(
-            lambda: client.last_status() is not None and client.last_status().charging, 10.0))
+            lambda: client.last_status() is not None and client.last_status().charging
+            and client.last_status().state == 'complete', 10.0))
         # Docking is as good as the position AMCL gives it, and against fake_base's scanner,
         # which casts its rays through the 5 cm cells of the map, that is 2 to 6 cm. The
         # stand-in charger takes the vehicle within 8 cm (fake_base_node, charger_contact);

@@ -52,7 +52,8 @@ jobs:
           # The launch tests talk over DDS: keep them to this container and to themselves.
           export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
           export ROS_DOMAIN_ID=$((RANDOM % 100 + 1))
-          colcon test --event-handlers console_cohesion+ --return-code-on-test-failure
+          # Run everything, then report: test-result prints each failure and fails the step.
+          colcon test --event-handlers console_cohesion+
           colcon test-result --verbose
 
       - name: Upload test results

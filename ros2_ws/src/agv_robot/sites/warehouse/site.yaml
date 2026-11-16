@@ -5,9 +5,12 @@
 # vehicle to the approach pose 0.8 m straight back from it and the docking controller
 # drives the rest.
 #
-# After changing this file, regenerate what is built from it:
-#   ros2 run agv_robot generate_masks      keepout.pgm / speed.pgm next to this file
-#   ros2 run agv_gazebo generate_world     the station stands in the Gazebo world
+# After changing this file, regenerate what is built from it (from the repository root):
+#   ros2 run agv_robot generate_masks ros2_ws/src/agv_robot/sites/warehouse
+#       the zone masks next to this file: keepout, keepout_planner and speed
+#   ros2 run agv_gazebo generate_world ros2_ws/src/agv_robot/sites/warehouse/site.yaml \
+#       ros2_ws/src/agv_gazebo/worlds/warehouse.sdf
+#       the Gazebo world, with a stand at every station
 # The package tests fail if either is forgotten.
 
 name: warehouse
