@@ -5,12 +5,22 @@ one place zones are written down; these functions turn it into the two images an
 the site against the map while they are at it. The masks are files in the repository, so
 the test suite regenerates them and fails if a zone was edited and the masks were not.
 
-Keep-out mask: occupied where the vehicle's centre may not be.
+Keep-out mask: occupied inside the zones. No part of the vehicle may enter them.
+Planner mask:  the zones, plus a band round them as wide as the vehicle's turning radius
+               in which the planner is told travel is expensive (BAND_VALUE). Nav2 applies
+               costmap filters after inflation, so keep-out cells are never inflated; its
+               planner plans for the vehicle's centre and, on the bare zones, routed it along
+               their edge, where the body (and its corners, turning) overlapped them and the
+               controller's footprint check refused to drive. Expensive rather than closed:
+               a vehicle that has strayed into the band can still plan its way out. The
+               global costmap gets this mask, the local costmap (the controller's) the bare
+               zones.
 Speed mask:    cell value v means "no faster than v x SPEED_STEP m/s here"; 0 is no limit.
 """
 
 from typing import List
 
+from agv_core.geometry import point_polygon_distance
 from agv_core.grid import FREE, GridMap, OCCUPIED
 from agv_core.sites import Site
 
@@ -19,11 +29,30 @@ from agv_core.sites import Site
 SPEED_STEP = 0.01
 
 
-def keepout_mask(site: Site, grid: GridMap) -> GridMap:
-    """Return a grid like `grid`, occupied inside every keep-out zone and free elsewhere."""
+def keepout_mask(site: Site, grid: GridMap, grow: float = 0.0) -> GridMap:
+    """Return a grid like `grid`, occupied inside every keep-out zone, free elsewhere.
+
+    With `grow`, every cell within that distance of a zone is occupied too.
+    """
     mask = grid.like(FREE)
     for zone in site.keepout_zones:
         mask.fill_polygon(zone.polygon, OCCUPIED)
+    if grow > 0.0:
+        mask.data[mask.inflated(grow, unknown_is_blocked=False)] = OCCUPIED
+    return mask
+
+
+# Mask value of the band round the zones: Nav2's keep-out filter turns 0..100 into a cost
+# in proportion, so 90 is a cost of 228 of 254, under the 253 at which the planner stops.
+BAND_VALUE = 90
+
+
+def planner_keepout_mask(site: Site, grid: GridMap, band: float) -> GridMap:
+    """Return the keep-out zones with an expensive band `band` wide round them."""
+    zones = keepout_mask(site, grid)
+    mask = keepout_mask(site, grid, grow=band)
+    mask.data[mask.data == OCCUPIED] = BAND_VALUE
+    mask.data[zones.data == OCCUPIED] = OCCUPIED
     return mask
 
 
@@ -62,6 +91,13 @@ def site_map_problems(site: Site, grid: GridMap, half_length: float, half_width:
         if not grid.is_free(start.x, start.y):
             problems.append(f"the approach pose of station '{station.name}' is not on free, "
                             'mapped floor')
+            continue
+        grown = [z.name for z in site.keepout_zones
+                 if point_polygon_distance((start.x, start.y), z.polygon) <= half_width]
+        if grown:
+            problems.append(
+                f"the approach pose of station '{station.name}' is within the vehicle's half "
+                f"width of keep-out zone '{grown[0]}': navigation cannot plan to it")
             continue
         room = grid.clearance_at(start.x, start.y)
         if room < turning_radius + 0.05:

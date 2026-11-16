@@ -5,6 +5,7 @@ A site is a directory:
     site.yaml       stations and zones (agv_core.sites)
     map.yaml/.pgm   the occupancy map SLAM built
     keepout.*       keep-out mask, generated from site.yaml
+    keepout_planner.*  the zones with an expensive band round them, for the planner
     speed.*         speed-limit mask, generated from site.yaml
 
 Sites shipped with the package live in its share directory under sites/<name>; anything
@@ -18,6 +19,7 @@ from ament_index_python.packages import get_package_share_directory
 SITE_FILE = 'site.yaml'
 MAP_FILE = 'map.yaml'
 KEEPOUT_MASK = 'keepout.yaml'
+PLANNER_KEEPOUT_MASK = 'keepout_planner.yaml'
 SPEED_MASK = 'speed.yaml'
 
 

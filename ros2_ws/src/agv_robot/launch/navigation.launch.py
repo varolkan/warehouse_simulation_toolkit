@@ -12,7 +12,7 @@ planner may cross space the map does not know yet.
 
 import os
 
-from agv_robot.paths import KEEPOUT_MASK, site_file, SPEED_MASK
+from agv_robot.paths import KEEPOUT_MASK, PLANNER_KEEPOUT_MASK, site_file, SPEED_MASK
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
@@ -65,7 +65,9 @@ def _nodes(context):
 
     if zones:
         site = LaunchConfiguration('site').perform(context)
-        masks = {'keepout': site_file(site, KEEPOUT_MASK), 'speed': site_file(site, SPEED_MASK)}
+        masks = {'keepout': site_file(site, KEEPOUT_MASK),
+                 'keepout_planner': site_file(site, PLANNER_KEEPOUT_MASK),
+                 'speed': site_file(site, SPEED_MASK)}
         for kind, mask in masks.items():
             if not os.path.isfile(mask):
                 raise RuntimeError(

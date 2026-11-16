@@ -1,7 +1,9 @@
 """Keep-out and speed masks, and the checks of a site against its map."""
 
 from agv_core.grid import FREE, GridMap, OCCUPIED
-from agv_core.masks import keepout_mask, site_map_problems, speed_mask, SPEED_STEP, speed_value
+from agv_core.masks import (
+    BAND_VALUE, keepout_mask, planner_keepout_mask, site_map_problems, speed_mask, SPEED_STEP,
+    speed_value)
 from agv_core.sites import Site
 import numpy as np
 import pytest
@@ -46,6 +48,30 @@ def test_the_keepout_mask_is_occupied_inside_the_zones_only():
     # The walls of the map are not zones: the mask only knows the site file.
     assert mask.value_at(0.02, 0.02) == FREE
     assert mask.occupied.sum() == 60 * 40
+
+
+def test_the_planner_mask_puts_an_expensive_band_round_the_zones():
+    grid = hall()
+    band = 0.38
+    exact, planner = keepout_mask(site(), grid), planner_keepout_mask(site(), grid, band)
+    # Inside a zone: closed, as in the exact mask.
+    assert exact.value_at(3.5, 6.0) == OCCUPIED and planner.value_at(3.5, 6.0) == OCCUPIED
+    # Within the band: expensive but open. Beyond it: free.
+    assert exact.value_at(1.85, 6.0) == FREE and planner.value_at(1.85, 6.0) == BAND_VALUE
+    assert planner.value_at(2.0 - band + 0.03, 6.0) == BAND_VALUE
+    assert planner.value_at(2.0 - band - 0.06, 6.0) == FREE
+    assert 0 < BAND_VALUE < OCCUPIED
+    # Exactly the zone cells are closed.
+    assert ((planner.data == OCCUPIED) == (exact.data == OCCUPIED)).all()
+
+
+def test_an_approach_pose_hard_by_a_keepout_zone_is_a_problem():
+    # The dock's approach pose is (9.7, 4.0); a keep-out zone 0.15 m beside it.
+    near = site(zones=[{'name': 'crates', 'kind': 'keepout',
+                        'polygon': [[9.4, 4.15], [9.9, 4.15], [9.9, 4.4], [9.4, 4.4]]}])
+    problems = site_map_problems(near, hall(), HALF_LENGTH, HALF_WIDTH)
+    assert problems == ["the approach pose of station 'dock' is within the vehicle's half "
+                        "width of keep-out zone 'crates': navigation cannot plan to it"]
 
 
 def test_the_speed_mask_holds_limits_in_centimetres_per_second():

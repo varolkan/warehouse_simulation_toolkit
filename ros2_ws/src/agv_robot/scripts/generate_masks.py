@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Draw a site's keep-out and speed-limit masks, or check that they are up to date.
 
-    generate_masks.py SITE_DIR            write keepout.* and speed.* next to site.yaml
+    generate_masks.py SITE_DIR            write the masks next to site.yaml
     generate_masks.py --check SITE_DIR    exit 1 if they are not what would be written
 
 SITE_DIR holds site.yaml and the map (map.yaml, map.pgm). The site is checked against the
@@ -16,11 +16,19 @@ import sys
 import tempfile
 
 from agv_core.grid import GridMap, MapError
-from agv_core.masks import keepout_mask, site_map_problems, speed_mask
+from agv_core.masks import keepout_mask, planner_keepout_mask, site_map_problems, speed_mask
 from agv_core.sites import Site, SiteError
 from agv_core.vehicle import AGV
 
-MASKS = (('keepout', keepout_mask, 'trinary'), ('speed', speed_mask, 'raw'))
+# Wide enough that the vehicle can turn anywhere outside it; padding as in Nav2's
+# costmaps (nav2.yaml, footprint_padding).
+PLANNER_BAND = AGV.turning_radius + 0.01
+MASKS = (
+    ('keepout', keepout_mask, 'trinary'),
+    ('keepout_planner', lambda site, grid: planner_keepout_mask(site, grid, PLANNER_BAND),
+     'raw'),
+    ('speed', speed_mask, 'raw'),
+)
 
 
 def write_masks(site, grid, directory):
@@ -51,7 +59,7 @@ def main(argv=None):
 
     if not args.check:
         write_masks(site, grid, args.site_dir)
-        print(f"wrote the keep-out and speed masks of '{site.name}' ({len(site.keepout_zones)} "
+        print(f"wrote the zone masks of '{site.name}' ({len(site.keepout_zones)} "
               f'keep-out zones, {len(site.speed_zones)} speed zones)')
         return 0
 
