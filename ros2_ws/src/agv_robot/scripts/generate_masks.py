@@ -16,15 +16,18 @@ import sys
 import tempfile
 
 from agv_core.grid import GridMap, MapError
-from agv_core.masks import keepout_mask, planner_keepout_mask, site_map_problems, speed_mask
+from agv_core.masks import (
+    controller_keepout_mask, planner_keepout_mask, site_map_problems, speed_mask)
 from agv_core.sites import Site, SiteError
 from agv_core.vehicle import AGV
 
 # Wide enough that the vehicle can turn anywhere outside it; padding as in Nav2's
 # costmaps (nav2.yaml, footprint_padding).
 PLANNER_BAND = AGV.turning_radius + 0.01
+# name, how it is drawn, how it is written. All three hold values between free and lethal,
+# so all three are written as they are (`raw`); agv_core/masks.py says what each is for.
 MASKS = (
-    ('keepout', keepout_mask, 'trinary'),
+    ('keepout', controller_keepout_mask, 'raw'),
     ('keepout_planner', lambda site, grid: planner_keepout_mask(site, grid, PLANNER_BAND),
      'raw'),
     ('speed', speed_mask, 'raw'),

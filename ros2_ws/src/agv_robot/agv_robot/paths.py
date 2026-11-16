@@ -2,11 +2,14 @@
 
 A site is a directory:
 
-    site.yaml       stations and zones (agv_core.sites)
-    map.yaml/.pgm   the occupancy map SLAM built
-    keepout.*       keep-out mask, generated from site.yaml
-    keepout_planner.*  the zones with an expensive band round them, for the planner
-    speed.*         speed-limit mask, generated from site.yaml
+    site.yaml          stations and zones (agv_core.sites)
+    map.yaml/.pgm      the occupancy map SLAM built
+    keepout.*          the keep-out zones for the controller, with a soft rim
+    keepout_planner.*  the keep-out zones for the planner, with a graded band round them
+    speed.*            speed-limit mask
+
+The three masks are generated from site.yaml (scripts/generate_masks.py); agv_core/masks.py
+says why there are two keep-out masks.
 
 Sites shipped with the package live in its share directory under sites/<name>; anything
 else is given as a path.

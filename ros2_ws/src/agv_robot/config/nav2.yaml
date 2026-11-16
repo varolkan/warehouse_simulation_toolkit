@@ -184,6 +184,8 @@ local_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 4.0
         inflation_radius: 0.6
+      # The zones with a soft rim: lethal only from 10 cm inside their edge, so a vehicle
+      # that grazed one can drive out of it again (agv_core/masks.py).
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
         enabled: true
@@ -234,8 +236,9 @@ global_costmap:
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
         enabled: true
-        # The zones with an expensive band round them as wide as the turning radius: the
-        # planner plans for the centre and filters are never inflated (agv_core/masks.py).
+        # The zones with an expensive band round them as wide as the turning radius, fading
+        # out over 25 cm beyond it: the planner plans for the centre and filters are never
+        # inflated (agv_core/masks.py).
         filter_info_topic: /keepout_planner_filter_info
       always_send_full_costmap: true
 

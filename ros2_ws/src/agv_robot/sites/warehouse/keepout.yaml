@@ -1,5 +1,5 @@
 image: keepout.pgm
-mode: trinary
+mode: raw
 resolution: 0.050
 origin: [-12.273, -13.088, 0]
 negate: 0
